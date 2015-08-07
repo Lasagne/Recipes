@@ -207,7 +207,7 @@ l_rec1 = lasagne.layers.GRULayer(
 l_drp1 = lasagne.layers.DropoutLayer(l_rec1, p=dropout_frac)
 
 # Second GRU layer
-l_rec2 = lasagne.layers.LSTMLayer(
+l_rec2 = lasagne.layers.GRULayer(
     l_drp1,
     num_units=REC_NUM_UNITS,
     learn_init=False,
