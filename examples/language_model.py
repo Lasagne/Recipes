@@ -1,7 +1,6 @@
 """
-Examples that reproduce the the results of http://arxiv.org/abs/1409.2329
-We only reproduce the small GRU language model on Penn Tree. This example uses
-GRU layers instead of LSTM layers.
+Examples that mimick the setup in http://arxiv.org/abs/1409.2329
+except that we use GRU instead of a LSTM layers.
 
 The example demonstrates:
 
@@ -35,10 +34,11 @@ lr = 1.0                            # learning rate
 decay = 2.0                         # decay factor
 no_decay_epochs = 5                 # run this many epochs before first decay
 max_grad_norm = 10                  # scale steps if norm is above this value
-num_epochs = 15                     # Number of epochs to run
+num_epochs = 200                    # Number of epochs to run
 
 
-# First define a functions to load the Penn Tree data.
+# First we'll define a functions to load the Penn Tree data.
+
 def load_data(file_name, vocab_map, vocab_idx):
     """
     Loads Penn Tree files downloaded from https://github.com/wojzaremba/lstm
@@ -197,10 +197,17 @@ l_emb = lasagne.layers.EmbeddingLayer(
 
 l_drp0 = lasagne.layers.DropoutLayer(l_emb, p=dropout_frac)
 
+
+def create_gate():
+    return lasagne.layers.Gate(W_in=INI, W_hid=INI, W_cell=None)
+
 # first GRU layer
 l_rec1 = lasagne.layers.GRULayer(
     l_drp0,
     num_units=REC_NUM_UNITS,
+    resetgate=create_gate(),
+    updategate=create_gate(),
+    hidden_update=create_gate(),
     learn_init=False,
     hid_init=hid1_init_sym)
 
@@ -210,6 +217,9 @@ l_drp1 = lasagne.layers.DropoutLayer(l_rec1, p=dropout_frac)
 l_rec2 = lasagne.layers.GRULayer(
     l_drp1,
     num_units=REC_NUM_UNITS,
+    resetgate=create_gate(),
+    updategate=create_gate(),
+    hidden_update=create_gate(),
     learn_init=False,
     hid_init=hid2_init_sym)
 
@@ -236,15 +246,20 @@ def calc_cross_ent(net_output, targets):
     return cost
 
 # Note the use of deterministic keyword to disable dropout during evaluation.
-train_out, l_rec1_train, l_rec2_train = lasagne.layers.get_output(
+train_out,  l_rec1_hid_out,  l_rec2_hid_out = lasagne.layers.get_output(
     [l_out, l_rec1, l_rec2], sym_x, deterministic=False)
-hidden_states_train = [l_rec1_train, l_rec2_train]
 
-eval_out, l_rec1_eval, l_rec2_eval = lasagne.layers.get_output(
+
+# after we have called get_ouput then the layers will have reference to
+# their output values. We need to keep track of the output values for both
+# training and evaluation and for each hidden layer because we want to
+# initialze each batch with the last hidden values from the previous batch.
+hidden_states_train = [l_rec1_hid_out, l_rec2_hid_out]
+
+eval_out, l_rec1_hid_out,  l_rec2_hid_out = lasagne.layers.get_output(
     [l_out, l_rec1, l_rec2], sym_x, deterministic=True)
-hidden_states_eval = [l_rec1_eval, l_rec2_eval]
+hidden_states_eval = [l_rec1_hid_out, l_rec2_hid_out]
 
-# Use cross-entropy cost
 cost_train = T.mean(calc_cross_ent(train_out, sym_y))
 cost_eval = T.mean(calc_cross_ent(eval_out, sym_y))
 
