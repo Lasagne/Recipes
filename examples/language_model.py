@@ -20,21 +20,24 @@ import os
 import time
 import gzip
 import lasagne
+import cPickle
+
+np.random.seed(1234)
 
 #  SETTINGS
 folder = 'penntree'                 # subfolder with data
-BATCH_SIZE = 20                     # batch size
-MODEL_SEQ_LEN = 20                  # how many steps to unroll
+BATCH_SIZE = 50                     # batch size
+MODEL_SEQ_LEN = 50                  # how many steps to unroll
 TOL = 1e-6                          # numerial stability
 INI = lasagne.init.Uniform(0.1)     # initial parameter values
-REC_NUM_UNITS = 200                 # number of LSTM units
-embedding_size = 200                # Embedding size
-dropout_frac = 0                    # optional recurrent dropout
-lr = 1.0                            # learning rate
+REC_NUM_UNITS = 400                 # number of LSTM units
+embedding_size = 400                # Embedding size
+dropout_frac = 0.1                  # optional recurrent dropout
+lr = 2e-3                           # learning rate
 decay = 2.0                         # decay factor
 no_decay_epochs = 5                 # run this many epochs before first decay
-max_grad_norm = 10                  # scale steps if norm is above this value
-num_epochs = 200                    # Number of epochs to run
+max_grad_norm = 15                  # scale steps if norm is above this value
+num_epochs = 1000                   # Number of epochs to run
 
 
 # First we'll define a functions to load the Penn Tree data.
@@ -273,11 +276,14 @@ all_params = lasagne.layers.get_all_params(l_out, trainable=True)
 # also rescaled the norm constraint.
 all_grads = T.grad(cost_train*MODEL_SEQ_LEN, all_params)
 
+all_grads = [T.clip(g, -5, 5) for g in all_grads]
+
 # With the gradients for each parameter we can calculate update rules for each
 # parameter. Lasagne implements a number of update rules, here we'll use
 # sgd and a total_norm_constraint.
 all_grads, norm = lasagne.updates.total_norm_constraint(
     all_grads, max_grad_norm, return_norm=True)
+
 
 # Use shared variable for learning rate. Allows us to change the learning rate
 # during training.
@@ -347,6 +353,9 @@ for epoch in range(num_epochs):
             x_batch, y_batch, hid1, hid2)
         l_cost.append(cost)
         l_norm.append(norm)
+    with open('model.pickle', 'wb') as f:
+        cPickle.dump(lasagne.layers.get_all_param_values(l_out), f,
+                     cPickle.HIGHEST_PROTOCOL)
 
     if epoch > (no_decay_epochs - 1):
         current_lr = sh_lr.get_value()
