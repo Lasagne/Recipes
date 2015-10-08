@@ -21,6 +21,10 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 # For the linked MNIST data, the autoencoder learns well only in binary mode.
 # This is most likely due to the distribution of the values. Most pixels are
 # either very close to 0, or very close to 1.
+#
+# Running this code with default settings should produce a manifold similar
+# to the example in this directory. An animation of the manifold's evolution
+# can be found here: https://youtu.be/pgmnCU_DxzM
 
 def load_dataset():
     if sys.version_info[0] == 2:
@@ -93,12 +97,13 @@ class GaussianSampleLayer(nn.layers.MergeLayer):
     def get_output_shape_for(self, input_shapes):
         return input_shapes[0]
 
-    def get_output_for(self, inputs, **kwargs):
+    def get_output_for(self, inputs, withNoise=True, **kwargs):
         mu, logsigma = inputs
         shape=(self.input_shapes[0][0] or inputs[0].shape[0],
                 self.input_shapes[0][1] or inputs[0].shape[1])
-        return mu + T.exp(logsigma) * self.rng.normal(shape)
-
+        if withNoise:
+            return mu + T.exp(logsigma) * self.rng.normal(shape)
+        return mu
 
 # ############################## Build Model #################################
 # encoder has 1 hidden layer, where we get mu and sigma for Z given an inp X
@@ -182,7 +187,6 @@ def build_vae(inputvar, L=2, binary=True, imgshape=(28,28), channels=1, z_dim=2,
 
 # ############################## Main program ################################
 
-# helper function for log-likelihood expression
 def log_likelihood(tgt, mu, ls):
     return T.sum(-(np.float32(0.5 * np.log(2 * np.pi)) + ls)
             - 0.5 * T.sqr(tgt - mu) / T.exp(2 * ls))
@@ -200,47 +204,52 @@ def main(L=2, z_dim=2, n_hid=1024, num_epochs=300, binary=True):
     l_z_mu, l_z_ls, l_x_mu_list, l_x_ls_list, l_x_list, l_x = \
            build_vae(input_var, L=L, binary=binary, z_dim=z_dim, n_hid=n_hid)
 
+    def build_loss(deterministic, withNoise=True):
+        layer_outputs = nn.layers.get_output([l_z_mu, l_z_ls] + l_x_mu_list + l_x_ls_list
+                + l_x_list, deterministic=deterministic)
+        z_mu =  layer_outputs[0]
+        z_ls =  layer_outputs[1]
+        x_mu =  [] if binary else layer_outputs[2:2+L]
+        x_ls =  [] if binary else layer_outputs[2+L:2+2*L]
+        x_list =  layer_outputs[2:2+L] if binary else layer_outputs[2+2*L:2+3*L]
+        # Loss expression has two parts as specified in [1]
+        # kl_div = KL divergence between p_theta(z) and p(z|x)
+        # - divergence between prior distr and approx posterior of z given x
+        # - or how likely we are to see this z when accounting for Gaussian prior
+        # logpxz = log p(x|z)
+        # - log-likelihood of x given z
+        # - in binary case logpxz = cross-entropy
+        # - in continuous case, is log-likelihood of seeing the target x under the
+        #   Gaussian distribution parameterized by dec_mu, sigma = exp(dec_logsigma)
+        kl_div = 0.5 * T.sum(1 + 2*z_ls - T.sqr(z_mu) - T.exp(2 * z_ls))
+        if binary:
+            logpxz = sum(nn.objectives.binary_crossentropy(x,
+                input_var.flatten(2)).sum() for x in x_list) * (-1./L)
+            prediction = nn.layers.get_output(l_x, deterministic=deterministic,
+                    withNoise=withNoise)
+        else:
+            logpxz = sum(log_likelihood(input_var.flatten(2), mu, ls)
+                for mu, ls in zip(x_mu, x_ls))/L
+            prediction = T.sum(nn.layers.get_output(l_x_mu_list, deterministic=deterministic,
+                withNoise=withNoise), axis=0)/L
+        loss = -1 * (logpxz + kl_div)
+        return loss, prediction
+
     # If there are dropout layers etc these functions return masked or non-masked expressions
     # depending on if they will be used for training or validation/test err calcs
-    layer_outputs = lambda b: nn.layers.get_output([l_z_mu, l_z_ls] +
-            l_x_mu_list + l_x_ls_list + l_x_list, deterministic=b)
-    z_mu = lambda b: layer_outputs(b)[0]
-    z_ls = lambda b: layer_outputs(b)[1]
-    x_mu = lambda b: [] if binary else layer_outputs(b)[2:2+L]
-    x_ls = lambda b: [] if binary else layer_outputs(b)[2+L:2+2*L]
-    x_list = lambda b: layer_outputs(b)[2 if binary else 2+2*L:]
-
-    # Loss expression has two parts as specified in [1]
-    # kl_div = KL divergence between p_theta(z) and p(z|x)
-    # - divergence between prior distr and approx posterior of z given x
-    # - or how likely we are to see this z when accounting for Gaussian prior
-    # logpxz = log p(x|z)
-    # - log-likelihood of x given z
-    # - in binary case logpxz = cross-entropy
-    # - in continuous case, is log-likelihood of seeing the target x under the
-    #   Gaussian distribution parameterized by dec_mu, sigma = exp(dec_logsigma)
-    kl_div = lambda b: 0.5 * T.sum(1 + 2*z_ls(b) - T.sqr(z_mu(b)) - T.exp(2 * z_ls(b)))
-    if binary:
-        logpxz = lambda b: sum(nn.objectives.binary_crossentropy(x,
-            input_var.flatten(2)).sum() for x in x_list(b)) * (-1./L)
-        test_prediction = nn.layers.get_output(l_x, deterministic=True)
-    else:
-        logpxz = lambda b: sum(log_likelihood(input_var.flatten(2), mu, ls)
-            for mu, ls in zip(x_mu(b), x_ls(b)))/L
-        test_prediction = T.sum(x_mu(True), axis=0)/L
-    loss = -1 * (logpxz(False) + kl_div(False))
-    test_loss = -1 * (logpxz(True) + kl_div(True))
+    loss, _ = build_loss(deterministic=False)
+    test_loss, test_prediction = build_loss(deterministic=True, withNoise=False)
 
     # functions for generating images given a code (used for visualization)
-    # we give the function a certain z and then set logsigma(z) to a very negative
-    # value to make the sampling nearly deterministic
+    # for an given code z, we deterministically take x_mu as the generated data
+    # (no Gaussian noise is used to either encode or decode).
     z_var = T.vector()
     if binary:
-        generated_x = nn.layers.get_output(l_x, {l_z_mu:z_var, l_z_ls:[-100,-100]},
+        generated_x = nn.layers.get_output(l_x, {l_z_mu:z_var}, withNoise=False,
                 deterministic=True)
     else:
-        generated_x = T.sum([nn.layers.get_output(l_x_mu, {l_z_mu:z_var, l_z_ls:[-100,-100]},
-                determistic=True) for l_x_mu in l_x_mu_list], axis=0) / L
+        generated_x = nn.layers.get_output(l_x_mu_list[0], {l_z_mu:z_var}, withNoise=False,
+                deterministic=True)
     gen_fn = theano.function([z_var], generated_x)
         
     # ADAM updates
