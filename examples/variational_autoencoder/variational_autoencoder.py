@@ -123,7 +123,6 @@ def build_vae(inputvar, L=2, binary=True, imgshape=(28,28), channels=1, z_dim=2,
             nonlinearity = None, name='enc_mu')
     l_enc_logsigma = nn.layers.DenseLayer(l_enc_hid, num_units=z_dim,
             nonlinearity = None, name='enc_logsigma')
-    l_Z_list = []
     l_dec_mu_list = []
     l_dec_logsigma_list = []
     l_output_list = []
@@ -181,7 +180,6 @@ def build_vae(inputvar, L=2, binary=True, imgshape=(28,28), channels=1, z_dim=2,
                 b_dec_mu = l_dec_mu.b
                 W_dec_ls = l_dec_logsigma.W
                 b_dec_ls = l_dec_logsigma.b
-        l_Z_list.append(l_Z)
     l_output = nn.layers.ElemwiseSumLayer(l_output_list, coeffs=1./L, name='output')
     return l_enc_mu, l_enc_logsigma, l_dec_mu_list, l_dec_logsigma_list, l_output_list, l_output
 
