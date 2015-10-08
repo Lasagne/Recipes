@@ -5,11 +5,9 @@ import theano
 import theano.tensor as T
 import lasagne as nn
 import time
-import pickle
 from PIL import Image
-from lasagne.layers import MergeLayer
-from theano.tensor.shared_randomstreams import RandomStreams
 from scipy.stats import norm
+from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
 # ############################################################################
 # Tencia Lee
@@ -71,8 +69,7 @@ def get_image_pair(X, Xpr, channels=1, idx=-1):
 
 # ############################# Batch iterator ###############################
 
-def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
-    assert len(inputs) == len(targets)
+def iterate_minibatches(inputs, batchsize, shuffle=False):
     if shuffle:
         indices = np.arange(len(inputs))
         np.random.shuffle(indices)
@@ -81,14 +78,14 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
             excerpt = indices[start_idx:start_idx + batchsize]
         else:
             excerpt = slice(start_idx, start_idx + batchsize)
-        yield inputs[excerpt], targets[excerpt]
+        yield inputs[excerpt]
 
 
 # ##################### Custom layer for middle of VCAE ######################
 # This layer takes the mu and sigma (both DenseLayers) and combines them with
 # a random vector epsilon to sample values for a multivariate Gaussian
 
-class GaussianSampleLayer(MergeLayer):
+class GaussianSampleLayer(nn.layers.MergeLayer):
     def __init__(self, mu, logsigma, rng=None, **kwargs):
         self.rng = rng if rng else RandomStreams(nn.random.get_rng().randint(1,2147462579))
         super(GaussianSampleLayer, self).__init__([mu, logsigma], **kwargs)
@@ -110,12 +107,13 @@ class GaussianSampleLayer(MergeLayer):
 # once we have (mu, sigma) for Z, we sample L times
 # Then L separate outputs are constructed and the final layer averages them
 
-def build_vae(inputvar, L=1, binary=False, imgshape=(28,28), channels=1, z_dim=2, n_hid=256):
+def build_vae(inputvar, L=2, binary=True, imgshape=(28,28), channels=1, z_dim=2, n_hid=1024):
     x_dim = imgshape[0] * imgshape[1] * channels
     l_input = nn.layers.InputLayer(shape=(None,channels,imgshape[0], imgshape[1]),
             input_var=inputvar, name='input')
     l_enc_hid = nn.layers.DenseLayer(l_input, num_units=n_hid,
-            nonlinearity=T.nnet.softplus, name='enc_hid')
+            nonlinearity=nn.nonlinearities.tanh if binary else T.nnet.softplus,
+            name='enc_hid')
     l_enc_mu = nn.layers.DenseLayer(l_enc_hid, num_units=z_dim,
             nonlinearity = None, name='enc_mu')
     l_enc_logsigma = nn.layers.DenseLayer(l_enc_hid, num_units=z_dim,
@@ -134,7 +132,7 @@ def build_vae(inputvar, L=1, binary=False, imgshape=(28,28), channels=1, z_dim=2
     for i in xrange(L):
         l_Z = GaussianSampleLayer(l_enc_mu, l_enc_logsigma, name='Z')
         l_dec_hid = nn.layers.DenseLayer(l_Z, num_units=n_hid,
-                nonlinearity = T.nnet.softplus,
+                nonlinearity = nn.nonlinearities.tanh if binary else T.nnet.softplus,
                 W=nn.init.GlorotUniform() if W_dec_hid is None else W_dec_hid,
                 b=nn.init.Constant(0.) if b_dec_hid is None else b_dec_hid,
                 name='dec_hid')
@@ -189,15 +187,11 @@ def log_likelihood(tgt, mu, ls):
     return T.sum(-(np.float32(0.5 * np.log(2 * np.pi)) + ls)
             - 0.5 * T.sqr(tgt - mu) / T.exp(2 * ls))
 
-def main(L=2, z_dim=2, n_hid=256, num_epochs=20, binary=True):
+def main(L=2, z_dim=2, n_hid=1024, num_epochs=300, binary=True):
     print("Loading data...")
     X_train, X_val, X_test = load_dataset()
-    X_train_tgt = X_train.reshape(X_train.shape[0],-1)
-    X_val_tgt = X_val.reshape(X_val.shape[0],-1)
-    X_test_tgt = X_test.reshape(X_test.shape[0],-1)
     width, height = X_train.shape[2], X_train.shape[3]
     input_var = T.tensor4('inputs')
-    target_var = T.dmatrix('targets')
 
     # Create VAE model
     print("Building model and compiling functions...")
@@ -208,11 +202,13 @@ def main(L=2, z_dim=2, n_hid=256, num_epochs=20, binary=True):
 
     # If there are dropout layers etc these functions return masked or non-masked expressions
     # depending on if they will be used for training or validation/test err calcs
-    z_mu = lambda b: nn.layers.get_output(l_z_mu, deterministic=b)
-    z_ls = lambda b: nn.layers.get_output(l_z_ls, deterministic=b)
-    x_mu = lambda b: [nn.layers.get_output(l_x_mu, deterministic=b) for l_x_mu in l_x_mu_list]
-    x_ls = lambda b: [nn.layers.get_output(l_x_ls, deterministic=b) for l_x_ls in l_x_ls_list]
-    x_list = lambda b: [nn.layers.get_output(l_x1, deterministic=b) for l_x1 in l_x_list]
+    layer_outputs = lambda b: nn.layers.get_output([l_z_mu, l_z_ls] +
+            l_x_mu_list + l_x_ls_list + l_x_list, deterministic=b)
+    z_mu = lambda b: layer_outputs(b)[0]
+    z_ls = lambda b: layer_outputs(b)[1]
+    x_mu = lambda b: [] if binary else layer_outputs(b)[2:2+L]
+    x_ls = lambda b: [] if binary else layer_outputs(b)[2+L:2+2*L]
+    x_list = lambda b: layer_outputs(b)[2 if binary else 2+2*L:]
 
     # Loss expression has two parts as specified in [1]
     # kl_div = KL divergence between p_theta(z) and p(z|x)
@@ -225,12 +221,12 @@ def main(L=2, z_dim=2, n_hid=256, num_epochs=20, binary=True):
     #   Gaussian distribution parameterized by dec_mu, sigma = exp(dec_logsigma)
     kl_div = lambda b: 0.5 * T.sum(1 + 2*z_ls(b) - T.sqr(z_mu(b)) - T.exp(2 * z_ls(b)))
     if binary:
-        logpxz = lambda b: T.sum([nn.objectives.binary_crossentropy(x, target_var).sum()
-            for x in x_list(b)]) * (-1./L)
+        logpxz = lambda b: sum(nn.objectives.binary_crossentropy(x,
+            input_var.flatten(2)).sum() for x in x_list(b)) * (-1./L)
         test_prediction = nn.layers.get_output(l_x, deterministic=True)
     else:
-        logpxz = lambda b: T.sum([log_likelihood(target_var, mu, ls)
-            for mu, ls in zip(x_mu(b), x_ls(b))])/L
+        logpxz = lambda b: sum(log_likelihood(input_var.flatten(2), mu, ls)
+            for mu, ls in zip(x_mu(b), x_ls(b)))/L
         test_prediction = T.sum(x_mu(True), axis=0)/L
     loss = -1 * (logpxz(False) + kl_div(False))
     test_loss = -1 * (logpxz(True) + kl_div(True))
@@ -238,18 +234,20 @@ def main(L=2, z_dim=2, n_hid=256, num_epochs=20, binary=True):
     # functions for generating images given a code (used for visualization)
     # we give the function a certain z and then set logsigma(z) to a very negative
     # value to make the sampling nearly deterministic
-    z_var = T.dvector()
-    x_bin = nn.layers.get_output(l_x, {l_z_mu:z_var, l_z_ls:[-100,-100]},
-            deterministic=True)
-    x_cont = T.sum([nn.layers.get_output(l_x_mu, {l_z_mu:z_var, l_z_ls:[-100,-100]},
-            determistic=True) for l_x_mu in l_x_mu_list], axis=0) / L
-    gen_fn = theano.function([z_var], x_bin if binary else x_cont)
+    z_var = T.vector()
+    if binary:
+        generated_x = nn.layers.get_output(l_x, {l_z_mu:z_var, l_z_ls:[-100,-100]},
+                deterministic=True)
+    else:
+        generated_x = T.sum([nn.layers.get_output(l_x_mu, {l_z_mu:z_var, l_z_ls:[-100,-100]},
+                determistic=True) for l_x_mu in l_x_mu_list], axis=0) / L
+    gen_fn = theano.function([z_var], generated_x)
         
     # ADAM updates
     params = nn.layers.get_all_params(l_x, trainable=True)
     updates = nn.updates.adam(loss, params, learning_rate=1e-4)
-    train_fn = theano.function([input_var, target_var], loss, updates=updates)
-    val_fn = theano.function([input_var, target_var], test_loss)
+    train_fn = theano.function([input_var], loss, updates=updates)
+    val_fn = theano.function([input_var], test_loss)
 
     print("Starting training...")
     batch_size = 100
@@ -257,16 +255,14 @@ def main(L=2, z_dim=2, n_hid=256, num_epochs=20, binary=True):
         train_err = 0
         train_batches = 0
         start_time = time.time()
-        for batch in iterate_minibatches(X_train, X_train_tgt, batch_size, shuffle=True):
-            inputs, targets = batch
-            this_err = train_fn(inputs, targets)
+        for batch in iterate_minibatches(X_train, batch_size, shuffle=True):
+            this_err = train_fn(batch)
             train_err += this_err
             train_batches += 1
         val_err = 0
         val_batches = 0
-        for batch in iterate_minibatches(X_val, X_val_tgt, batch_size, shuffle=False):
-            inputs, targets = batch
-            err = val_fn(inputs, targets)
+        for batch in iterate_minibatches(X_val, batch_size, shuffle=False):
+            err = val_fn(batch)
             val_err += err
             val_batches += 1
         print("Epoch {} of {} took {:.3f}s".format(
@@ -276,14 +272,14 @@ def main(L=2, z_dim=2, n_hid=256, num_epochs=20, binary=True):
 
     test_err = 0
     test_batches = 0
-    for batch in iterate_minibatches(X_test, X_test_tgt, batch_size, shuffle=False):
-        inputs, targets = batch
-        err = val_fn(inputs, targets)
+    for batch in iterate_minibatches(X_test, batch_size, shuffle=False):
+        err = val_fn(batch)
         test_err += err
         test_batches += 1
     test_err /= test_batches
     print("Final results:")
     print("  test loss:\t\t\t{:.6f}".format(test_err))
+
     # save some example pictures so we can see what it's done 
     example_batch_size = 20
     X_comp = X_test[:example_batch_size]
@@ -291,13 +287,14 @@ def main(L=2, z_dim=2, n_hid=256, num_epochs=20, binary=True):
     X_pred = pred_fn(X_comp).reshape(-1, 1, width, height)
     for i in range(20):
         get_image_pair(X_comp, X_pred, idx=i, channels=1).save('output_{}.jpg'.format(i))
+
     # save the parameters so they can be loaded for next time
     print("Saving")
-    fn = 'p_{:.6f}.params'.format(test_err)
-    pickle.dump(nn.layers.get_all_param_values(l_x), open(fn, 'w'))
+    fn = 'params_{:.6f}'.format(test_err)
+    np.savez(fn + '.npz', *nn.layers.get_all_param_values(l_x))
 
     # sample from latent space if it's 2d
-    if L == 2:
+    if z_dim == 2:
         im = Image.new('L', (width*19,height*19))
         for (x,y),val in np.ndenumerate(np.zeros((19,19))):
             z = np.asarray([norm.ppf(0.05*(x+1)), norm.ppf(0.05*(y+1))],
