@@ -224,11 +224,11 @@ def main(L=2, z_dim=2, n_hid=1024, num_epochs=300, binary=True):
         if binary:
             logpxz = sum(nn.objectives.binary_crossentropy(x,
                 input_var.flatten(2)).sum() for x in x_list) * (-1./L)
-            prediction = x
+            prediction = x_list[0] if deterministic else x
         else:
             logpxz = sum(log_likelihood(input_var.flatten(2), mu, ls)
                 for mu, ls in zip(x_mu, x_ls))/L
-            prediction = T.sum(x_mu, axis=0)/L
+            prediction = x_mu[0] if deterministic else T.sum(x_mu, axis=0)/L
         loss = -1 * (logpxz + kl_div)
         return loss, prediction
 
