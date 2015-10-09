@@ -204,12 +204,13 @@ def main(L=2, z_dim=2, n_hid=1024, num_epochs=300, binary=True):
 
     def build_loss(deterministic, withNoise=True):
         layer_outputs = nn.layers.get_output([l_z_mu, l_z_ls] + l_x_mu_list + l_x_ls_list
-                + l_x_list, deterministic=deterministic)
+                + l_x_list + [l_x], deterministic=deterministic, withNoise=withNoise)
         z_mu =  layer_outputs[0]
         z_ls =  layer_outputs[1]
         x_mu =  [] if binary else layer_outputs[2:2+L]
         x_ls =  [] if binary else layer_outputs[2+L:2+2*L]
         x_list =  layer_outputs[2:2+L] if binary else layer_outputs[2+2*L:2+3*L]
+        x = layer_outputs[-1]
         # Loss expression has two parts as specified in [1]
         # kl_div = KL divergence between p_theta(z) and p(z|x)
         # - divergence between prior distr and approx posterior of z given x
@@ -223,13 +224,11 @@ def main(L=2, z_dim=2, n_hid=1024, num_epochs=300, binary=True):
         if binary:
             logpxz = sum(nn.objectives.binary_crossentropy(x,
                 input_var.flatten(2)).sum() for x in x_list) * (-1./L)
-            prediction = nn.layers.get_output(l_x, deterministic=deterministic,
-                    withNoise=withNoise)
+            prediction = x
         else:
             logpxz = sum(log_likelihood(input_var.flatten(2), mu, ls)
                 for mu, ls in zip(x_mu, x_ls))/L
-            prediction = T.sum(nn.layers.get_output(l_x_mu_list, deterministic=deterministic,
-                withNoise=withNoise), axis=0)/L
+            prediction = T.sum(x_mu, axis=0)/L
         loss = -1 * (logpxz + kl_div)
         return loss, prediction
 
@@ -238,18 +237,6 @@ def main(L=2, z_dim=2, n_hid=1024, num_epochs=300, binary=True):
     loss, _ = build_loss(deterministic=False)
     test_loss, test_prediction = build_loss(deterministic=True, withNoise=False)
 
-    # functions for generating images given a code (used for visualization)
-    # for an given code z, we deterministically take x_mu as the generated data
-    # (no Gaussian noise is used to either encode or decode).
-    z_var = T.vector()
-    if binary:
-        generated_x = nn.layers.get_output(l_x, {l_z_mu:z_var}, withNoise=False,
-                deterministic=True)
-    else:
-        generated_x = nn.layers.get_output(l_x_mu_list[0], {l_z_mu:z_var}, withNoise=False,
-                deterministic=True)
-    gen_fn = theano.function([z_var], generated_x)
-        
     # ADAM updates
     params = nn.layers.get_all_params(l_x, trainable=True)
     updates = nn.updates.adam(loss, params, learning_rate=1e-4)
@@ -302,6 +289,17 @@ def main(L=2, z_dim=2, n_hid=1024, num_epochs=300, binary=True):
 
     # sample from latent space if it's 2d
     if z_dim == 2:
+        # functions for generating images given a code (used for visualization)
+        # for an given code z, we deterministically take x_mu as the generated data
+        # (no Gaussian noise is used to either encode or decode).
+        z_var = T.vector()
+        if binary:
+            generated_x = nn.layers.get_output(l_x, {l_z_mu:z_var}, withNoise=False,
+                    deterministic=True)
+        else:
+            generated_x = nn.layers.get_output(l_x_mu_list[0], {l_z_mu:z_var}, withNoise=False,
+                    deterministic=True)
+        gen_fn = theano.function([z_var], generated_x)
         im = Image.new('L', (width*19,height*19))
         for (x,y),val in np.ndenumerate(np.zeros((19,19))):
             z = np.asarray([norm.ppf(0.05*(x+1)), norm.ppf(0.05*(y+1))],
