@@ -97,13 +97,13 @@ class GaussianSampleLayer(nn.layers.MergeLayer):
     def get_output_shape_for(self, input_shapes):
         return input_shapes[0]
 
-    def get_output_for(self, inputs, withNoise=True, **kwargs):
+    def get_output_for(self, inputs, deterministic=False, **kwargs):
         mu, logsigma = inputs
         shape=(self.input_shapes[0][0] or inputs[0].shape[0],
                 self.input_shapes[0][1] or inputs[0].shape[1])
-        if withNoise:
-            return mu + T.exp(logsigma) * self.rng.normal(shape)
-        return mu
+        if deterministic:
+            return mu
+        return mu + T.exp(logsigma) * self.rng.normal(shape)
 
 # ############################## Build Model #################################
 # encoder has 1 hidden layer, where we get mu and sigma for Z given an inp X
@@ -202,9 +202,9 @@ def main(L=2, z_dim=2, n_hid=1024, num_epochs=300, binary=True):
     l_z_mu, l_z_ls, l_x_mu_list, l_x_ls_list, l_x_list, l_x = \
            build_vae(input_var, L=L, binary=binary, z_dim=z_dim, n_hid=n_hid)
 
-    def build_loss(deterministic, withNoise=True):
+    def build_loss(deterministic):
         layer_outputs = nn.layers.get_output([l_z_mu, l_z_ls] + l_x_mu_list + l_x_ls_list
-                + l_x_list + [l_x], deterministic=deterministic, withNoise=withNoise)
+                + l_x_list + [l_x], deterministic=deterministic)
         z_mu =  layer_outputs[0]
         z_ls =  layer_outputs[1]
         x_mu =  [] if binary else layer_outputs[2:2+L]
@@ -235,7 +235,7 @@ def main(L=2, z_dim=2, n_hid=1024, num_epochs=300, binary=True):
     # If there are dropout layers etc these functions return masked or non-masked expressions
     # depending on if they will be used for training or validation/test err calcs
     loss, _ = build_loss(deterministic=False)
-    test_loss, test_prediction = build_loss(deterministic=True, withNoise=False)
+    test_loss, test_prediction = build_loss(deterministic=True)
 
     # ADAM updates
     params = nn.layers.get_all_params(l_x, trainable=True)
@@ -294,10 +294,9 @@ def main(L=2, z_dim=2, n_hid=1024, num_epochs=300, binary=True):
         # (no Gaussian noise is used to either encode or decode).
         z_var = T.vector()
         if binary:
-            generated_x = nn.layers.get_output(l_x, {l_z_mu:z_var}, withNoise=False,
-                    deterministic=True)
+            generated_x = nn.layers.get_output(l_x, {l_z_mu:z_var}, deterministic=True)
         else:
-            generated_x = nn.layers.get_output(l_x_mu_list[0], {l_z_mu:z_var}, withNoise=False,
+            generated_x = nn.layers.get_output(l_x_mu_list[0], {l_z_mu:z_var}, 
                     deterministic=True)
         gen_fn = theano.function([z_var], generated_x)
         im = Image.new('L', (width*19,height*19))
