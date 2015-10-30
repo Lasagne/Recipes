@@ -2,6 +2,9 @@
 #http://caffe.berkeleyvision.org/
 #License: non-commercial use only
 
+# Pretrained weights (233M) can be downloaded from:
+# https://s3.amazonaws.com/lasagne/recipes/pretrained/imagenet/caffe_reference.pkl
+
 from lasagne.layers import InputLayer, Conv2DLayer
 from lasagne.layers import MaxPool2DLayer, LocalResponseNormalization2DLayer
 from lasagne.layers import SliceLayer, concat, DenseLayer
@@ -133,7 +136,10 @@ def load_caffe():
     Also checks to make sure the two models produce equivalent
     results. The ouput model is saved to caffe_reference.pkl
 
-    To run this change the variable caffe_root
+    Before running this, you need to install caffe and change
+    the caffe_root variable to point to your installation.
+
+    http://caffe.berkeleyvision.org/
     """
 
     import cPickle as pickle
@@ -153,7 +159,7 @@ def load_caffe():
                     caffe_root + 'models/bvlc_reference_caffenet/bvlc_reference_caffenet.caffemodel',
                     caffe.TEST)
 
-    # create my network
+    # create lasagne network
     my_net = build_model()
     
     # try it the way they do in the recipies
@@ -200,8 +206,10 @@ def load_caffe():
     ########################################
     # test networks
     ########################################
+    # use the cat image to test
     im = caffe.io.load_image(caffe_root + 'examples/images/cat.jpg')
 
+    # set up and preprocess the image
     transformer = caffe.io.Transformer({'data': caffe_net.blobs['data'].data.shape})
     transformer.set_mean('data', np.load(caffe_root + 'python/caffe/imagenet/ilsvrc_2012_mean.npy').mean(1).mean(1))
     transformer.set_transpose('data', (2,0,1))
