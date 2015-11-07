@@ -45,7 +45,7 @@ def build_inception_module(name, input_layer, nfilters):
 
 def build_model():
     net = {}
-    net['input'] = InputLayer((None, 3, None, None))
+    net['input'] = InputLayer((None, 3, 224, 224))
     net['conv1/7x7_s2'] = ConvLayer(net['input'], 64, 7, stride=2, pad=3)
     net['pool1/3x3_s2'] = PoolLayer(net['conv1/7x7_s2'],
                                     pool_size=3,
