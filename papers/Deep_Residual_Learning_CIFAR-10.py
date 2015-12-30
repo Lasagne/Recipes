@@ -119,16 +119,16 @@ def build_cnn(input_var=None, n=5):
         if increase_dim:
             if projection:
                 # projection shortcut, as option B in paper
-                projection = ConvLayer(l, num_filters=out_num_filters, filter_size=(1,1), stride=(2,2), nonlinearity=None, pad='same', b=None)
-                block = NonlinearityLayer(batch_norm(ElemwiseSumLayer([stack_2, projection])),nonlinearity=rectify)
+                projection = batch_norm(ConvLayer(l, num_filters=out_num_filters, filter_size=(1,1), stride=(2,2), nonlinearity=None, pad='same', b=None))
+                block = NonlinearityLayer(ElemwiseSumLayer([stack_2, projection]),nonlinearity=rectify)
             else:
                 # identity shortcut, as option A in paper
                 # we use a pooling layer to get identity with strides, since identity layers with stride don't exist in Lasagne
                 identity = Pool2DLayer(l, pool_size=1, stride=(2,2), mode='average_exc_pad')
-                padding = PadLayer(identity, [out_num_filters/4,0,0], batch_ndim=1)
-                block = NonlinearityLayer(batch_norm(ElemwiseSumLayer([stack_2, padding])),nonlinearity=rectify)
+                padding = PadLayer(identity, [out_num_filters//4,0,0], batch_ndim=1)
+                block = NonlinearityLayer(ElemwiseSumLayer([stack_2, padding]),nonlinearity=rectify)
         else:
-            block = NonlinearityLayer(batch_norm(ElemwiseSumLayer([stack_2, l])),nonlinearity=rectify)
+            block = NonlinearityLayer(ElemwiseSumLayer([stack_2, l]),nonlinearity=rectify)
         
         return block
 
