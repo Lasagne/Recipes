@@ -64,17 +64,6 @@ def load_data():
     X_train = np.concatenate((X_train,X_train_flip),axis=0)
     Y_train = np.concatenate((Y_train,Y_train_flip),axis=0)
 
-    # shuffle arrays
-    from random import shuffle
-    train_index = [i for i in range(100000)]
-    test_index = [i for i in range(10000)]
-    random.shuffle(train_index)
-    random.shuffle(test_index)
-    train_index = np.array(train_index)
-    test_index = np.array(test_index)
-    
-    X_train = X_train[train_index,:,:,:]
-    Y_train = Y_train[train_index]
     X_test = x[test_index+50000,:,:,:]
     Y_test = y[test_index+50000]
 
@@ -246,6 +235,12 @@ def main(n=5, num_epochs=82):
     print("Starting training...")
     # We iterate over epochs:
     for epoch in range(num_epochs):
+        # shuffle training data
+        train_indices = np.arange(100000)
+        np.random.shuffle(train_indices)
+        X_train = X_train[train_indices,:,:,:]
+        Y_train = Y_train[train_indices]
+
         # In each epoch, we do a full pass over the training data:
         train_err = 0
         train_batches = 0
