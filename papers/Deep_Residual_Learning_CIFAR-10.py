@@ -3,7 +3,8 @@
 """
 Lasagne implementation of CIFAR-10 examples from "Deep Residual Learning for Image Recognition" (http://arxiv.org/abs/1512.03385)
 
-With n=5, i.e. 32-layer network from the paper, this achieves a validation error of 6.88% (vs 7.51% in the paper).
+With n=5, i.e. 32-layer network from the paper, this achieves a validation error of approximately 7.5% (same as in the paper).
+With a single run of n=9 (56-layer network), we achieved a validation error of 7.2% (i.e. close to papers error of 6.97%).
 The accuracy has not yet been tested for the other values of n.
 """
 
@@ -20,6 +21,9 @@ import numpy as np
 import theano
 import theano.tensor as T
 import lasagne
+
+# for the larger networks (n>=9), we need to adjust pythons recursion limit
+sys.setrecursionlimit(10000)
 
 # ##################### Load data from CIFAR-10 dataset #######################
 # this code assumes the cifar dataset from 'https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz'
@@ -85,8 +89,6 @@ from lasagne.layers import PadLayer
 from lasagne.layers import Pool2DLayer
 from lasagne.layers import NonlinearityLayer
 from lasagne.nonlinearities import softmax, rectify
-
-# NB! from pull request #461 : https://github.com/f0k/Lasagne/blob/98b5581fa830cda3d3f838506ef14e5811a35ef7/lasagne/layers/normalization.py
 from lasagne.layers import batch_norm
 
 def build_cnn(input_var=None, n=5):
@@ -147,6 +149,7 @@ def build_cnn(input_var=None, n=5):
     # fully connected layer
     network = DenseLayer(
             l, num_units=10,
+            W=lasagne.init.HeNormal(),
             nonlinearity=softmax)
 
     return network
