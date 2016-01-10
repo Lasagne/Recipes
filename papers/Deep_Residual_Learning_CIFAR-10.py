@@ -68,8 +68,8 @@ def load_data():
     X_train = np.concatenate((X_train,X_train_flip),axis=0)
     Y_train = np.concatenate((Y_train,Y_train_flip),axis=0)
 
-    X_test = x[test_index+50000,:,:,:]
-    Y_test = y[test_index+50000]
+    X_test = x[50000:,:,:,:]
+    Y_test = y[50000:]
 
     return dict(
         X_train=lasagne.utils.floatX(X_train),
@@ -199,7 +199,7 @@ def main(n=5, num_epochs=82):
     # Create neural network model
     print("Building model and compiling functions...")
     network = build_cnn(input_var, n)
-    print("number of parameters in model: %d" % lasagne.layers.count_params(network))
+    print("number of parameters in model: %d" % lasagne.layers.count_params(network, trainable=True))
     
     # Create a loss expression for training, i.e., a scalar objective we want
     # to minimize (for our multi-class problem, it is the cross-entropy loss):
@@ -220,7 +220,7 @@ def main(n=5, num_epochs=82):
             loss, params, learning_rate=sh_lr, momentum=0.9)
 
     # Create a loss expression for validation/testing
-    test_prediction = lasagne.layers.get_output(network)
+    test_prediction = lasagne.layers.get_output(network, deterministic=True)
     test_loss = lasagne.objectives.categorical_crossentropy(test_prediction,
                                                             target_var)
     test_loss = test_loss.mean()
