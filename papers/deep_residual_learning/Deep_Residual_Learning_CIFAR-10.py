@@ -3,9 +3,8 @@
 """
 Lasagne implementation of CIFAR-10 examples from "Deep Residual Learning for Image Recognition" (http://arxiv.org/abs/1512.03385)
 
-With n=5, i.e. 32-layer network from the paper, this achieves a validation error of approximately 7.5% (same as in the paper).
-With a single run of n=9 (56-layer network), we achieved a validation error of 7.2% (i.e. close to papers error of 6.97%).
-The accuracy has not yet been tested for the other values of n.
+Check the accompanying files for pretrained models. The 32-layer network (n=5), achieves a validation error of 7.42%, 
+while the 56-layer network (n=9) achieves error of 6.75%, which is roughly equivalent to the examples in the paper.
 """
 
 from __future__ import print_function
@@ -183,7 +182,7 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False, augment=False
 
 # ############################## Main program ################################
 
-def main(n=5, num_epochs=82):
+def main(n=5, num_epochs=82, model=None):
     # Load the dataset
     print("Loading data...")
     data = load_data()
@@ -201,23 +200,28 @@ def main(n=5, num_epochs=82):
     network = build_cnn(input_var, n)
     print("number of parameters in model: %d" % lasagne.layers.count_params(network, trainable=True))
     
-    # Create a loss expression for training, i.e., a scalar objective we want
-    # to minimize (for our multi-class problem, it is the cross-entropy loss):
-    prediction = lasagne.layers.get_output(network)
-    loss = lasagne.objectives.categorical_crossentropy(prediction, target_var)
-    loss = loss.mean()
-    # add weight decay
-    all_layers = lasagne.layers.get_all_layers(network)
-    l2_penalty = lasagne.regularization.regularize_layer_params(all_layers, lasagne.regularization.l2) * 0.0001
-    loss = loss + l2_penalty
+    if model is None:
+        # Create a loss expression for training, i.e., a scalar objective we want
+        # to minimize (for our multi-class problem, it is the cross-entropy loss):
+        prediction = lasagne.layers.get_output(network)
+        loss = lasagne.objectives.categorical_crossentropy(prediction, target_var)
+        loss = loss.mean()
+        # add weight decay
+        all_layers = lasagne.layers.get_all_layers(network)
+        l2_penalty = lasagne.regularization.regularize_layer_params(all_layers, lasagne.regularization.l2) * 0.0001
+        loss = loss + l2_penalty
 
-    # Create update expressions for training
-    # Stochastic Gradient Descent (SGD) with momentum
-    params = lasagne.layers.get_all_params(network, trainable=True)
-    lr = 0.1
-    sh_lr = theano.shared(lasagne.utils.floatX(lr))
-    updates = lasagne.updates.momentum(
-            loss, params, learning_rate=sh_lr, momentum=0.9)
+        # Create update expressions for training
+        # Stochastic Gradient Descent (SGD) with momentum
+        params = lasagne.layers.get_all_params(network, trainable=True)
+        lr = 0.1
+        sh_lr = theano.shared(lasagne.utils.floatX(lr))
+        updates = lasagne.updates.momentum(
+                loss, params, learning_rate=sh_lr, momentum=0.9)
+        
+        # Compile a function performing a training step on a mini-batch (by giving
+        # the updates dictionary) and returning the corresponding training loss:
+        train_fn = theano.function([input_var, target_var], loss, updates=updates)
 
     # Create a loss expression for validation/testing
     test_prediction = lasagne.layers.get_output(network, deterministic=True)
@@ -227,59 +231,64 @@ def main(n=5, num_epochs=82):
     test_acc = T.mean(T.eq(T.argmax(test_prediction, axis=1), target_var),
                       dtype=theano.config.floatX)
 
-    # Compile a function performing a training step on a mini-batch (by giving
-    # the updates dictionary) and returning the corresponding training loss:
-    train_fn = theano.function([input_var, target_var], loss, updates=updates)
-
     # Compile a second function computing the validation loss and accuracy:
     val_fn = theano.function([input_var, target_var], [test_loss, test_acc])
 
-    # Finally, launch the training loop.
-    print("Starting training...")
-    # We iterate over epochs:
-    for epoch in range(num_epochs):
-        # shuffle training data
-        train_indices = np.arange(100000)
-        np.random.shuffle(train_indices)
-        X_train = X_train[train_indices,:,:,:]
-        Y_train = Y_train[train_indices]
+    if model is None:
+        # launch the training loop
+        print("Starting training...")
+        # We iterate over epochs:
+        for epoch in range(num_epochs):
+            # shuffle training data
+            train_indices = np.arange(100000)
+            np.random.shuffle(train_indices)
+            X_train = X_train[train_indices,:,:,:]
+            Y_train = Y_train[train_indices]
 
-        # In each epoch, we do a full pass over the training data:
-        train_err = 0
-        train_batches = 0
-        start_time = time.time()
-        for batch in iterate_minibatches(X_train, Y_train, 128, shuffle=True, augment=True):
-            inputs, targets = batch
-            train_err += train_fn(inputs, targets)
-            train_batches += 1
+            # In each epoch, we do a full pass over the training data:
+            train_err = 0
+            train_batches = 0
+            start_time = time.time()
+            for batch in iterate_minibatches(X_train, Y_train, 128, shuffle=True, augment=True):
+                inputs, targets = batch
+                train_err += train_fn(inputs, targets)
+                train_batches += 1
 
-        # And a full pass over the validation data:
-        val_err = 0
-        val_acc = 0
-        val_batches = 0
-        for batch in iterate_minibatches(X_test, Y_test, 500, shuffle=False):
-            inputs, targets = batch
-            err, acc = val_fn(inputs, targets)
-            val_err += err
-            val_acc += acc
-            val_batches += 1
+            # And a full pass over the validation data:
+            val_err = 0
+            val_acc = 0
+            val_batches = 0
+            for batch in iterate_minibatches(X_test, Y_test, 500, shuffle=False):
+                inputs, targets = batch
+                err, acc = val_fn(inputs, targets)
+                val_err += err
+                val_acc += acc
+                val_batches += 1
 
-        # Then we print the results for this epoch:
-        print("Epoch {} of {} took {:.3f}s".format(
-            epoch + 1, num_epochs, time.time() - start_time))
-        print("  training loss:\t\t{:.6f}".format(train_err / train_batches))
-        print("  validation loss:\t\t{:.6f}".format(val_err / val_batches))
-        print("  validation accuracy:\t\t{:.2f} %".format(
-            val_acc / val_batches * 100))
+            # Then we print the results for this epoch:
+            print("Epoch {} of {} took {:.3f}s".format(
+                epoch + 1, num_epochs, time.time() - start_time))
+            print("  training loss:\t\t{:.6f}".format(train_err / train_batches))
+            print("  validation loss:\t\t{:.6f}".format(val_err / val_batches))
+            print("  validation accuracy:\t\t{:.2f} %".format(
+                val_acc / val_batches * 100))
 
-        # adjust learning rate as in paper
-        # 32k and 48k iterations should be roughly equivalent to 41 and 61 epochs
-        if (epoch+1) == 41 or (epoch+1) == 61:
-            new_lr = sh_lr.get_value() * 0.1
-            print("New LR:"+str(new_lr))
-            sh_lr.set_value(lasagne.utils.floatX(new_lr))
+            # adjust learning rate as in paper
+            # 32k and 48k iterations should be roughly equivalent to 41 and 61 epochs
+            if (epoch+1) == 41 or (epoch+1) == 61:
+                new_lr = sh_lr.get_value() * 0.1
+                print("New LR:"+str(new_lr))
+                sh_lr.set_value(lasagne.utils.floatX(new_lr))
 
-    # After training, we compute and print the test error:
+        # dump the network weights to a file :
+        np.savez('cifar10_deep_residual_model.npz', *lasagne.layers.get_all_param_values(network))
+    else:
+        # load network weights from model file
+        with np.load(model) as f:
+             param_values = [f['arr_%d' % i] for i in range(len(f.files))]
+        lasagne.layers.set_all_param_values(network, param_values)
+
+    # Calculate validation error of model:
     test_err = 0
     test_acc = 0
     test_batches = 0
@@ -294,27 +303,19 @@ def main(n=5, num_epochs=82):
     print("  test accuracy:\t\t{:.2f} %".format(
         test_acc / test_batches * 100))
 
-    # dump the network weights to a file :
-    np.savez('cifar10_deep_residual_model.npz', *lasagne.layers.get_all_param_values(network))
-    #
-    # And load them again later on like this:
-    # with np.load('cifar10_deep_residual_model.npz') as f:
-    #     param_values = [f['arr_%d' % i] for i in range(len(f.files))]
-    # lasagne.layers.set_all_param_values(network, param_values)
-
 
 if __name__ == '__main__':
     if ('--help' in sys.argv) or ('-h' in sys.argv):
         print("Trains a Deep Residual Learning network on cifar-10 using Lasagne.")
         print("Network architecture and training parameters are as in section 4.2 in 'Deep Residual Learning for Image Recognition'.")
-        print("Usage: %s [N [EPOCHS]]" % sys.argv[0])
+        print("Usage: %s [N [MODEL]]" % sys.argv[0])
         print()
         print("N: Number of stacked residual building blocks per feature map (default: 5)")
-        print("EPOCHS: number of training epochs to perform (default: 82)")
+        print("MODEL: saved model file to load (for validation) (default: None)")
     else:
         kwargs = {}
         if len(sys.argv) > 1:
             kwargs['n'] = int(sys.argv[1])
         if len(sys.argv) > 2:
-            kwargs['num_epochs'] = int(sys.argv[3])
+            kwargs['model'] = sys.argv[2]
         main(**kwargs)
