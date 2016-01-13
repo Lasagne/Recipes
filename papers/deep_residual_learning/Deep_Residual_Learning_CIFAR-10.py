@@ -85,7 +85,7 @@ from lasagne.layers import InputLayer
 from lasagne.layers import DenseLayer
 from lasagne.layers import GlobalPoolLayer
 from lasagne.layers import PadLayer
-from lasagne.layers import Pool2DLayer
+from lasagne.layers import ExpressionLayer
 from lasagne.layers import NonlinearityLayer
 from lasagne.nonlinearities import softmax, rectify
 from lasagne.layers import batch_norm
@@ -113,8 +113,7 @@ def build_cnn(input_var=None, n=5):
                 block = NonlinearityLayer(ElemwiseSumLayer([stack_2, projection]),nonlinearity=rectify)
             else:
                 # identity shortcut, as option A in paper
-                # we use a pooling layer to get identity with strides, since identity layers with stride don't exist in Lasagne
-                identity = Pool2DLayer(l, pool_size=1, stride=(2,2), mode='average_exc_pad')
+                identity = ExpressionLayer(l, lambda X: X[:, :, ::2, ::2], lambda s: (s[0], s[1], s[2]//2, s[3]//2))
                 padding = PadLayer(identity, [out_num_filters//4,0,0], batch_ndim=1)
                 block = NonlinearityLayer(ElemwiseSumLayer([stack_2, padding]),nonlinearity=rectify)
         else:
@@ -183,6 +182,11 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False, augment=False
 # ############################## Main program ################################
 
 def main(n=5, num_epochs=82, model=None):
+    # Check if cifar data exists
+    if not os.path.exists("./cifar-10-batches-py"):
+        print("CIFAR-10 dataset can not be found. Please download the dataset from 'https://www.cs.toronto.edu/~kriz/cifar.html'.")
+        return
+
     # Load the dataset
     print("Loading data...")
     data = load_data()
