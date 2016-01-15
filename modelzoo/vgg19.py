@@ -1,44 +1,103 @@
-# VGG-19, 19-layer model from the paper:
-# "Very Deep Convolutional Networks for Large-Scale Image Recognition"
-# Original source: https://gist.github.com/ksimonyan/3785162f95cd2d5fee77
-# License: non-commercial use only
+import numpy as np
+import lasagne as nn
+from lasagne.layers import dnn
+from functools import partial
+import os
+import utils
+import pickle
 
-# Download pretrained weights from:
-# https://s3.amazonaws.com/lasagne/recipes/pretrained/imagenet/vgg19.pkl
+conv3 = partial(dnn.Conv2DDNNLayer,
+                stride=(1, 1),
+                border_mode="same",
+                filter_size=(3, 3),
+                nonlinearity=nn.nonlinearities.rectify)
 
-from lasagne.layers import InputLayer, DenseLayer, NonlinearityLayer
-from lasagne.layers.dnn import Conv2DDNNLayer as ConvLayer
-from lasagne.layers import Pool2DLayer as PoolLayer
-from lasagne.nonlinearities import softmax
+dense = partial(nn.layers.DenseLayer,
+                nonlinearity=nn.nonlinearities.rectify)
+
+max_pool = partial(dnn.MaxPool2DDNNLayer,
+                   pool_size=(2, 2),
+                   stride=(2, 2))
 
 
-def build_model():
-    net = {}
-    net['input'] = InputLayer((None, 3, 224, 224))
-    net['conv1_1'] = ConvLayer(net['input'], 64, 3, pad=1)
-    net['conv1_2'] = ConvLayer(net['conv1_1'], 64, 3, pad=1)
-    net['pool1'] = PoolLayer(net['conv1_2'], 2)
-    net['conv2_1'] = ConvLayer(net['pool1'], 128, 3, pad=1)
-    net['conv2_2'] = ConvLayer(net['conv2_1'], 128, 3, pad=1)
-    net['pool2'] = PoolLayer(net['conv2_2'], 2)
-    net['conv3_1'] = ConvLayer(net['pool2'], 256, 3, pad=1)
-    net['conv3_2'] = ConvLayer(net['conv3_1'], 256, 3, pad=1)
-    net['conv3_3'] = ConvLayer(net['conv3_2'], 256, 3, pad=1)
-    net['conv3_4'] = ConvLayer(net['conv3_3'], 256, 3, pad=1)
-    net['pool3'] = PoolLayer(net['conv3_4'], 2)
-    net['conv4_1'] = ConvLayer(net['pool3'], 512, 3, pad=1)
-    net['conv4_2'] = ConvLayer(net['conv4_1'], 512, 3, pad=1)
-    net['conv4_3'] = ConvLayer(net['conv4_2'], 512, 3, pad=1)
-    net['conv4_4'] = ConvLayer(net['conv4_3'], 512, 3, pad=1)
-    net['pool4'] = PoolLayer(net['conv4_4'], 2)
-    net['conv5_1'] = ConvLayer(net['pool4'], 512, 3, pad=1)
-    net['conv5_2'] = ConvLayer(net['conv5_1'], 512, 3, pad=1)
-    net['conv5_3'] = ConvLayer(net['conv5_2'], 512, 3, pad=1)
-    net['conv5_4'] = ConvLayer(net['conv5_3'], 512, 3, pad=1)
-    net['pool5'] = PoolLayer(net['conv5_4'], 2)
-    net['fc6'] = DenseLayer(net['pool5'], num_units=4096)
-    net['fc7'] = DenseLayer(net['fc6'], num_units=4096)
-    net['fc8'] = DenseLayer(net['fc7'], num_units=1000, nonlinearity=None)
-    net['prob'] = NonlinearityLayer(net['fc8'], softmax)
+def vgg19(batch_shape):
+    """
+    Create a vgg19, with the parameters from http://www.robots.ox.ac.uk/~vgg/research/very_deep/
+    See googlenet.py for the method used to convert these caffe parameters to lasagne parameters.
+    :param batch_shape: The shape of the input images. This should be of size (N, 3, X>=224, Y>=224). Note flexible
+    image size, as the last dense layers have been implemented here with convolutional layers.
+    :return: a struct with the input layer, the logit layer (before the final softmax) and the output layer.
+    """
+    l_in = nn.layers.InputLayer(shape=batch_shape)
+    l = l_in
 
-    return net
+    l = conv3(l, num_filters=64)
+    l = conv3(l, num_filters=64)
+
+    l = max_pool(l)
+
+    l = conv3(l, num_filters=128)
+    l = conv3(l, num_filters=128)
+
+    l = max_pool(l)
+
+    l = conv3(l, num_filters=256)
+    l = conv3(l, num_filters=256)
+    l = conv3(l, num_filters=256)
+    l = conv3(l, num_filters=256)
+
+    l = max_pool(l)
+
+    l = conv3(l, num_filters=512)
+    l = conv3(l, num_filters=512)
+    l = conv3(l, num_filters=512)
+    l = conv3(l, num_filters=512)
+
+    l = max_pool(l)
+
+    l = conv3(l, num_filters=512)
+    l = conv3(l, num_filters=512)
+    l = conv3(l, num_filters=512)
+    l = conv3(l, num_filters=512)
+
+    l = max_pool(l)
+
+    l = dnn.Conv2DDNNLayer(l,
+                           num_filters=4096,
+                           stride=(1, 1),
+                           border_mode="valid",
+                           filter_size=(7, 7))
+    l = dnn.Conv2DDNNLayer(l,
+                           num_filters=4096,
+                           stride=(1, 1),
+                           border_mode="same",
+                           filter_size=(1, 1))
+
+    l_logit = dnn.Conv2DDNNLayer(l,
+                                 num_filters=1000,
+                                 stride=(1, 1),
+                                 border_mode="same",
+                                 filter_size=(1, 1),
+                                 nonlinearity=None)
+
+    l_logit_flat = nn.layers.FlattenLayer(l_logit)
+    l_dense = nn.layers.NonlinearityLayer(l_logit_flat, nonlinearity=nn.nonlinearities.softmax)
+
+    filename = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vgg19.pkl')
+
+    if os.path.exists(filename):
+        with open(filename, 'r') as f:
+            nn.layers.set_all_param_values(l_dense, pickle.load(f))
+
+    return utils.struct(
+        input=l_in,
+        out=l_dense,
+        logit=l_logit
+    )
+
+
+if __name__ == "__main__":
+    model = vgg19((1, 3, 224, 224))
+    nn.layers.set_all_param_values(model.out, np.load("data/vgg19.npy"))
+    filename = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vgg19.pkl')
+    pickle.dump(nn.layers.get_all_param_values(model.out), open(filename, 'w'))
