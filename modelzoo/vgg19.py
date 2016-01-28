@@ -36,11 +36,11 @@ def build_model():
     net['conv5_3'] = ConvLayer(net['conv5_2'], 512, 3, pad=1)
     net['conv5_4'] = ConvLayer(net['conv5_3'], 512, 3, pad=1)
     net['pool5'] = PoolLayer(net['conv5_4'], 2)
-    net['dropout6'] = DropoutLayer(net['pool5'], p=0.5)
-    net['fc7'] = DenseLayer(net['dropout6'], num_units=4096)
-    net['dropout8'] = DropoutLayer(net['fc7'], p=0.5)
-    net['fc9'] = DenseLayer(net['dropout8'], num_units=4096)
-    net['fc10'] = DenseLayer(net['fc9'], num_units=1000, nonlinearity=None)
-    net['prob'] = NonlinearityLayer(net['fc10'], softmax)
+    net['fc6_dropout'] = DropoutLayer(net['pool5'], p=0.5)
+    net['fc6'] = DenseLayer(net['fc6_dropout'], num_units=4096)
+    net['fc7_dropout'] = DropoutLayer(net['fc6'], p=0.5)
+    net['fc7'] = DenseLayer(net['fc7_dropout'], num_units=4096)
+    net['fc8'] = DenseLayer(net['fc7'], num_units=1000, nonlinearity=None)
+    net['prob'] = NonlinearityLayer(net['fc8'], softmax)
 
     return net
