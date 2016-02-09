@@ -148,7 +148,7 @@ def main(num_epochs=NUM_EPOCHS):
     cost = T.nnet.categorical_crossentropy(network_output,target_values).mean()
 
     # Retrieve all parameters from the network
-    all_params = lasagne.layers.get_all_params(l_out)
+    all_params = lasagne.layers.get_all_params(l_out,trainable=True)
 
     # Compute AdaGrad updates for training
     print("Computing updates ...")
