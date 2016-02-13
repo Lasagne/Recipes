@@ -7,11 +7,13 @@
 # Download pretrained weights from:
 # https://s3.amazonaws.com/lasagne/recipes/pretrained/imagenet/vgg_cnn_s.pkl
 
-from lasagne.layers import InputLayer, DenseLayer, DropoutLayer
+from lasagne.layers import DenseLayer
+from lasagne.layers import DropoutLayer
+from lasagne.layers import InputLayer
+from lasagne.layers import LocalResponseNormalization2DLayer as NormLayer
 from lasagne.layers import NonlinearityLayer
 from lasagne.layers.dnn import Conv2DDNNLayer as ConvLayer
 from lasagne.layers import MaxPool2DLayer as PoolLayer
-from lasagne.layers import LocalResponseNormalization2DLayer as NormLayer
 from lasagne.nonlinearities import softmax
 
 
@@ -22,14 +24,18 @@ def build_model():
     net['conv1'] = ConvLayer(net['input'],
                              num_filters=96,
                              filter_size=7,
-                             stride=2)
+                             stride=2,
+                             flip_filters=False)
     # caffe has alpha = alpha * pool_size
     net['norm1'] = NormLayer(net['conv1'], alpha=0.0001)
     net['pool1'] = PoolLayer(net['norm1'],
                              pool_size=3,
                              stride=3,
                              ignore_border=False)
-    net['conv2'] = ConvLayer(net['pool1'], num_filters=256, filter_size=5)
+    net['conv2'] = ConvLayer(net['pool1'],
+                             num_filters=256,
+                             filter_size=5,
+                             flip_filters=False)
     net['pool2'] = PoolLayer(net['conv2'],
                              pool_size=2,
                              stride=2,
@@ -37,15 +43,18 @@ def build_model():
     net['conv3'] = ConvLayer(net['pool2'],
                              num_filters=512,
                              filter_size=3,
-                             pad=1)
+                             pad=1,
+                             flip_filters=False)
     net['conv4'] = ConvLayer(net['conv3'],
                              num_filters=512,
                              filter_size=3,
-                             pad=1)
+                             pad=1,
+                             flip_filters=False)
     net['conv5'] = ConvLayer(net['conv4'],
                              num_filters=512,
                              filter_size=3,
-                             pad=1)
+                             pad=1,
+                             flip_filters=False)
     net['pool5'] = PoolLayer(net['conv5'],
                              pool_size=3,
                              stride=3,
