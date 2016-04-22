@@ -127,16 +127,13 @@ def main(num_epochs=NUM_EPOCHS):
 
     l_forward_2 = lasagne.layers.LSTMLayer(
         l_forward_1, N_HIDDEN, grad_clipping=GRAD_CLIP,
-        nonlinearity=lasagne.nonlinearities.tanh)
+        nonlinearity=lasagne.nonlinearities.tanh,
+        only_return_final=True)
 
-    # The l_forward layer creates an output of dimension (batch_size, SEQ_LENGTH, N_HIDDEN)
-    # Since we are only interested in the final prediction, we isolate that quantity and feed it to the next layer. 
-    # The output of the sliced layer will then be of size (batch_size, N_HIDDEN)
-    l_forward_slice = lasagne.layers.SliceLayer(l_forward_2, -1, 1)
-
-    # The sliced output is then passed through the softmax nonlinearity to create probability distribution of the prediction
+    # The output of l_forward_2 of shape (batch_size, N_HIDDEN) is then passed through the softmax nonlinearity to 
+    # create probability distribution of the prediction
     # The output of this stage is (batch_size, vocab_size)
-    l_out = lasagne.layers.DenseLayer(l_forward_slice, num_units=vocab_size, W = lasagne.init.Normal(), nonlinearity=lasagne.nonlinearities.softmax)
+    l_out = lasagne.layers.DenseLayer(l_forward_2, num_units=vocab_size, W = lasagne.init.Normal(), nonlinearity=lasagne.nonlinearities.softmax)
 
     # Theano tensor for the targets
     target_values = T.ivector('target_output')
