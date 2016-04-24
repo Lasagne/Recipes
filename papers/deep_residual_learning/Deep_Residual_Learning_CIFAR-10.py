@@ -78,8 +78,8 @@ def load_data():
 
 # ##################### Build the neural network model #######################
 
-#from lasagne.layers import Conv2DLayer as ConvLayer
-from lasagne.layers.dnn import Conv2DDNNLayer as ConvLayer
+from lasagne.layers import Conv2DLayer as ConvLayer
+#from lasagne.layers.dnn import Conv2DDNNLayer as ConvLayer
 from lasagne.layers import ElemwiseSumLayer
 from lasagne.layers import InputLayer
 from lasagne.layers import DenseLayer
@@ -102,14 +102,14 @@ def build_cnn(input_var=None, n=5):
             first_stride = (1,1)
             out_num_filters = input_num_filters
 
-        stack_1 = batch_norm(ConvLayer(l, num_filters=out_num_filters, filter_size=(3,3), stride=first_stride, nonlinearity=rectify, pad='same', W=lasagne.init.HeNormal(gain='relu')))
-        stack_2 = batch_norm(ConvLayer(stack_1, num_filters=out_num_filters, filter_size=(3,3), stride=(1,1), nonlinearity=None, pad='same', W=lasagne.init.HeNormal(gain='relu')))
+        stack_1 = batch_norm(ConvLayer(l, num_filters=out_num_filters, filter_size=(3,3), stride=first_stride, nonlinearity=rectify, pad='same', W=lasagne.init.HeNormal(gain='relu'), flip_filters=False))
+        stack_2 = batch_norm(ConvLayer(stack_1, num_filters=out_num_filters, filter_size=(3,3), stride=(1,1), nonlinearity=None, pad='same', W=lasagne.init.HeNormal(gain='relu'), flip_filters=False))
         
         # add shortcut connections
         if increase_dim:
             if projection:
                 # projection shortcut, as option B in paper
-                projection = batch_norm(ConvLayer(l, num_filters=out_num_filters, filter_size=(1,1), stride=(2,2), nonlinearity=None, pad='same', b=None))
+                projection = batch_norm(ConvLayer(l, num_filters=out_num_filters, filter_size=(1,1), stride=(2,2), nonlinearity=None, pad='same', b=None, flip_filters=False))
                 block = NonlinearityLayer(ElemwiseSumLayer([stack_2, projection]),nonlinearity=rectify)
             else:
                 # identity shortcut, as option A in paper
@@ -125,7 +125,7 @@ def build_cnn(input_var=None, n=5):
     l_in = InputLayer(shape=(None, 3, 32, 32), input_var=input_var)
 
     # first layer, output is 16 x 32 x 32
-    l = batch_norm(ConvLayer(l_in, num_filters=16, filter_size=(3,3), stride=(1,1), nonlinearity=rectify, pad='same', W=lasagne.init.HeNormal(gain='relu')))
+    l = batch_norm(ConvLayer(l_in, num_filters=16, filter_size=(3,3), stride=(1,1), nonlinearity=rectify, pad='same', W=lasagne.init.HeNormal(gain='relu'), flip_filters=False))
     
     # first stack of residual blocks, output is 16 x 32 x 32
     for _ in range(n):
