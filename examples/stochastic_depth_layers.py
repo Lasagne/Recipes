@@ -32,13 +32,10 @@ from time import time
 
 """
 class BinomialDropLayer(Layer):
-    def __init__(self, incoming, nonlinearity=rectify, survival_p=0.5,
-                 **kwargs):
+    def __init__(self, incoming, p=0.5, **kwargs):
         super(BinomialDropLayer, self).__init__(incoming, **kwargs)
-        self.nonlinearity = (identity if nonlinearity is None
-                             else nonlinearity)
         self._srng = RandomStreams(get_rng().randint(1, 2147462579))
-        self.p = 1-survival_p
+        self.p = p
 
     def get_output_for(self, input, deterministic=False, **kwargs):
         if deterministic:
@@ -47,25 +44,22 @@ class BinomialDropLayer(Layer):
             #mask = self._srng.binomial(n=1, p=(self.p), size=(input.shape[0],),
             #    dtype=input.dtype)
             # apply the same thing to all examples in the minibatch
-            mask = T.zeros((input.shape[0],)) + self._srng.uniform( (1,), 0, 1)[0]
+            mask = T.zeros((input.shape[0],)) + _srng.binomial((1,), p=self.p, dtype=input.dtype)[0]
             mask = mask.dimshuffle(0,'x','x','x')
             return mask*input
 
 class IfElseDropLayer(Layer):
-    def __init__(self, incoming, nonlinearity=rectify, survival_p=0.5,
-                 **kwargs):
+    def __init__(self, incoming, p=0.5, **kwargs):
         super(IfElseDropLayer, self).__init__(incoming, **kwargs)
-        self.nonlinearity = (identity if nonlinearity is None
-                             else nonlinearity)
         self._srng = RandomStreams(get_rng().randint(1, 2147462579))
-        self.p = 1-survival_p
+        self.p = p
 
     def get_output_for(self, input, deterministic=False, **kwargs):
         if deterministic:
             return self.p*input
         else:
             return ifelse(
-                T.lt(self._srng.uniform( (1,), 0, 1)[0], self.p),
+                T.lt(_srng.binomial((1,), p=self.p, dtype=input.dtype)[0], self.p),
                 input,
                 T.zeros(input.shape)
             )
