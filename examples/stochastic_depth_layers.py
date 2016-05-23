@@ -44,7 +44,7 @@ class BinomialDropLayer(Layer):
             #mask = self._srng.binomial(n=1, p=(self.p), size=(input.shape[0],),
             #    dtype=input.dtype)
             # apply the same thing to all examples in the minibatch
-            mask = T.zeros((input.shape[0],)) + _srng.binomial((1,), p=self.p, dtype=input.dtype)[0]
+            mask = T.zeros((input.shape[0],)) + self._srng.binomial((1,), p=self.p, dtype=input.dtype)[0]
             mask = mask.dimshuffle(0,'x','x','x')
             return mask*input
 
@@ -59,7 +59,7 @@ class IfElseDropLayer(Layer):
             return self.p*input
         else:
             return ifelse(
-                T.lt(_srng.binomial((1,), p=self.p, dtype=input.dtype)[0], self.p),
+                T.lt(self._srng.uniform( (1,), 0, 1)[0], self.p),
                 input,
                 T.zeros(input.shape)
             )
@@ -97,7 +97,7 @@ def residual_block(layer, num_filters, filter_size=3, stride=1, num_layers=2, su
         stride = 1
     nonlinearity = conv.nonlinearity
     conv.nonlinearity = lasagne.nonlinearities.identity
-    conv = BinomialDropLayer(conv, survival_p=survival_p)
+    conv = IfElseDropLayer(conv, p=survival_p)
     return NonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity)
 
 def get_net():
@@ -151,8 +151,8 @@ train_fn = theano.function(inputs=[X, y], outputs=loss, updates=updates)
 eval_fn = theano.function(inputs=[X, y], outputs=loss)
 preds_fn = theano.function(inputs=[X], outputs=net_out_det)
 
-batch_size = 128
-n_batches = X_train.shape[0] // batch_size
+bs = 128
+n_batches = X_train.shape[0] // bs
 num_epochs = 10
 print "epoch,avg_train_loss,valid_loss,valid_acc,time"
 for epoch in range(0, num_epochs):
