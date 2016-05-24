@@ -78,27 +78,26 @@ maps. This is because this is how the authors in the following link have defined
 https://github.com/yueatsprograms/Stochastic_Depth/blob/master/ResidualDrop.lua
 """
 
-def residual_block(layer, num_filters, filter_size=3, stride=1, num_layers=2, survival_p=0.5):
+def residual_block(layer, n_out_channels, stride=1, survival_p=0.5):
     conv = layer
-    if (num_filters != layer.output_shape[1]) or (stride != 1):
+    if stride > 1:
         layer = Pool2DLayer(layer, pool_size=1, stride=stride, mode="average_inc_pad")
-        diff = num_filters-layer.output_shape[1]
+    if (n_out_channels != layer.output_shape[1]):
+        diff = n_out_channels-layer.output_shape[1]
         if diff % 2 == 0: 
             width_tp = ((diff/2, diff/2),)
         else:
             width_tp = (((diff/2)+1, diff/2),)
-        layer = pad(
-            layer, 
-            batch_ndim=1, 
-            width=width_tp
-        )
-    for _ in range(num_layers):
-        conv = Conv2DLayer(conv, num_filters, filter_size, stride=stride, pad='same')
-        stride = 1
-    nonlinearity = conv.nonlinearity
-    conv.nonlinearity = lasagne.nonlinearities.identity
-    conv = IfElseDropLayer(conv, p=survival_p)
-    return NonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity)
+        layer = pad(layer, batch_ndim=1, width=width_tp)
+    conv = Conv2DLayer(conv, num_filters=n_out_channels,
+                       filter_size=(3,3), stride=(stride,stride), pad=(1,1), nonlinearity=linear)
+    conv = BatchNormLayer(conv)
+    conv = NonlinearityLayer(conv, nonlinearity=rectify)
+    conv = Conv2DLayer(conv, num_filters=n_out_channels,
+                       filter_size=(3,3), stride=(1,1), pad=(1,1), nonlinearity=linear)
+    conv = BatchNormLayer(conv)
+    conv = BinomialDropLayer(conv, p=survival_p)
+    return NonlinearityLayer(ElemwiseSumLayer([conv, layer]), nonlinearity=rectify)
 
 def get_net():
     # Architecture from:
