@@ -1,7 +1,7 @@
 # VGG-19, 19-layer model from the paper:
 # "Very Deep Convolutional Networks for Large-Scale Image Recognition"
 # Original source: https://gist.github.com/ksimonyan/3785162f95cd2d5fee77
-# License: non-commercial use only
+# License: see http://www.robots.ox.ac.uk/~vgg/research/very_deep/
 
 # Download pretrained weights from:
 # https://s3.amazonaws.com/lasagne/recipes/pretrained/imagenet/vgg19.pkl
