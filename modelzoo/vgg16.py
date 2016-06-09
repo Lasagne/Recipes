@@ -1,7 +1,7 @@
 # VGG-16, 16-layer model from the paper:
 # "Very Deep Convolutional Networks for Large-Scale Image Recognition"
 # Original source: https://gist.github.com/ksimonyan/211839e770f7b538e2d8
-# License: non-commercial use only
+# License: see http://www.robots.ox.ac.uk/~vgg/research/very_deep/
 
 # Download pretrained weights from:
 # https://s3.amazonaws.com/lasagne/recipes/pretrained/imagenet/vgg16.pkl
