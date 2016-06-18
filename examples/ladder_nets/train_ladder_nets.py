@@ -143,7 +143,7 @@ def train_epoch(stream):
     print '\n'.join(['Layer #{} rec cost: {}'.format(i, c) for i, c
                      in enumerate(np.mean(rec_costs, axis=0))])
     stats = np.stack(stats, axis=0).mean(axis=0)
-    means, inv_stds = stat
+    means, inv_stds = stats
     for i in range(len(num_encoder)):
         print '{}: mean {}, inv_std {}'.format(bl_name.format(i),
                                        np.allclose(means[i], 0.),
