@@ -1,8 +1,11 @@
 from lasagne.layers import InputLayer, MergeLayer, DenseLayer, DropoutLayer, \
-    GaussianNoiseLayer, NonlinearityLayer
+    GaussianNoiseLayer, NonlinearityLayer, standardize, BiasLayer, ScaleLayer, \
+    ExpressionLayer
 from lasagne.layers.normalization import BatchNormLayer
 from lasagne.nonlinearities import *
 import lasagne
+
+# from ladder_net_layers import CombinatorLayer, SharedNormLayer
 
 import theano
 import theano.tensor as T
@@ -88,14 +91,14 @@ def _combinator_MILAudem(z, u, combinator_params, bc_pttrn):
               w_u_lin.dimshuffle(*bc_pttrn) * u + \
               w_zu_lin.dimshuffle(*bc_pttrn) * z * u + \
               b_lin.dimshuffle(*bc_pttrn)
-                
+
     sigm_pre = w_z_sigm.dimshuffle(*bc_pttrn) * z + \
                w_u_sigm.dimshuffle(*bc_pttrn) * u + \
                w_zu_sigm.dimshuffle(*bc_pttrn) * z * u + \
                b_sigm.dimshuffle(*bc_pttrn)
-    
+
     sigm_out = T.nnet.sigmoid(sigm_pre)
-    
+
     output = w_sigm.dimshuffle(*bc_pttrn) * sigm_out + lin_out
 
     return output
@@ -116,7 +119,7 @@ def _combinator_curiousAI(z, u, combinator_params, bc_pttrn):
 
     v_sig_pre = w_v_sig.dimshuffle(*bc_pttrn) * u + \
                 b_v_sig.dimshuffle(*bc_pttrn)
-        
+
     v_lin_out = w_v_lin.dimshuffle(*bc_pttrn) * u + \
                 b_v_lin.dimshuffle(*bc_pttrn)
 
@@ -132,7 +135,7 @@ def _combinator(z, u, combinator_type, combinator_params):
         bc_pttrn = ('x', 0)
     elif u.ndim == 4:
         bc_pttrn = ('x', 0, 'x', 'x')
-    
+
     if combinator_type == 'milaUDEM':
         return _combinator_MILAudem(z, u, combinator_params, bc_pttrn)
     elif combinator_type == 'curiousAI':
@@ -153,11 +156,11 @@ class CombinatorLayer(MergeLayer):
 
         if len(z_shp) != len(u_shp):
             raise ValueError("The inputs must have the same shape: "
-                             "(batch_size, num_hidden) in case of dense layer or \n"
-                             "(batch_size, num_feature_maps, height, width) "
-                             "in case of conv layer.")
+                             "(batch_size, num_hidden) in case of dense layer "
+                             "or \n (batch_size, num_feature_maps, height, "
+                             "width) in case of conv layer.")
 
-        self.combinator_params = _create_combinator_params(combinator_type, 
+        self.combinator_params = _create_combinator_params(combinator_type,
                                                            u_shp[1:],
                                                            self.name)
 
@@ -170,8 +173,46 @@ class CombinatorLayer(MergeLayer):
         return _combinator(z, u, self.combinator_type, self.combinator_params)
 
 
-def build_encoder(net, num_hidden, activation, name,
-                  p_drop_hidden=0., shared_net=None):
+class SharedNormLayer(MergeLayer):
+    """
+        A layer that combines the terms from dirty and clean encoders,
+        and outputs denoised variable:
+            $$ \hat{z} = g(\tilde{z}, u)$$
+    """
+    def __init__(self, incoming2stats, incoming2norm, axes='auto', epsilon=1e-4,
+                 **kwargs):
+        super(SharedNormLayer, self).__init__(
+            [incoming2stats, incoming2norm], **kwargs)
+        stats_shp, norm_shp = self.input_shapes
+
+        if len(stats_shp) != len(norm_shp):
+            raise ValueError("The inputs must have the same shape: "
+                             "(batch_size, num_hidden) in case of dense layer "
+                             "or \n (batch_size, num_feature_maps, height, "
+                             "width) in case of conv layer.")
+
+        if axes == 'auto':
+            # default: normalize over all but the second axis
+            axes = (0,) + tuple(range(2, len(stats_shp)))
+        elif isinstance(axes, int):
+            axes = (axes,)
+        self.axes = axes
+        self.epsilon = epsilon
+
+    def get_output_shape_for(self, input_shapes):
+        return input_shapes[0]
+
+    def get_output_for(self, inputs, **kwargs):
+        to_stats, to_norm = inputs
+        assert to_stats.ndim == to_norm.ndim
+
+        mean = to_stats.mean(self.axes)
+        inv_std = T.inv(T.sqrt(to_stats.var(self.axes) + self.epsilon))
+
+        return (to_norm - mean) * inv_std
+
+
+def build_encoder(net, num_hidden, activation, name, p_drop_hidden, shared_net):
     for i, num_nodes in enumerate(num_hidden):
         dense_lname = 'enc_dense_{}'.format(i)
         nbatchn_lname = 'enc_batchn_{}_norm'.format(i)
@@ -188,105 +229,107 @@ def build_encoder(net, num_hidden, activation, name,
             # dense pars
             W = shared_net[dense_lname].get_params()[0]
             # batchnorm pars
-            if activation==rectify:
-                beta = shared_net[lbatchn_lname].get_params()[0]
-                gamma = None
-            else:
-                beta, gamma = shared_net[lbatchn_lname].get_params()
+            beta = shared_net[lbatchn_lname + '_beta'].get_params()[0]
+            gamma = None if activation==rectify else \
+                shared_net[lbatchn_lname + '_gamma'].get_params()[0]
 
-        net[dense_lname] = DenseLayer(net.values()[-1], num_units=num_nodes, W=W,
-                                      nonlinearity=linear,
+        # affine transformation: $W \hat{h}$
+        net[dense_lname] = DenseLayer(net.values()[-1], num_units=num_nodes,
+                                      W=W, nonlinearity=linear,
                                       name='{}_{}'.format(name, dense_lname))
-
-        shp = net[dense_lname].output_shape[1]
-        zero_const = T.zeros(shp, np.float32)
-        one_const = T.ones(shp, np.float32)
 
         # 1. batchnormalize without learning -> goes to combinator layer
         l_name = '{}_{}'.format(name, nbatchn_lname)
-        net[nbatchn_lname] = BatchNormLayer(net.values()[-1], alpha=0.1,
-                                            beta=None, gamma=None, name=l_name)
+        net[nbatchn_lname] = BatchNormLayer(net.values()[-1], alpha=0.1, name=l_name,
+                                            beta=None, gamma=None)
 
         if shared_net is None:
-            # add noise in dirty encoder
+            # for dirty encoder -> add noise
             net[noise_lname] = GaussianNoiseLayer(net.values()[-1],
                                                   sigma=p_drop_hidden,
                                                   name='{}_{}_'.format(name,
                                                                        noise_lname))
 
-        # 2. batchnormalization learning, 
-        # alpha set to one in order to depenend only on the given batch mean and inv_std
+        # 2. scaling & offsetting batchnormalization + noise
         l_name = '{}_{}'.format(name, lbatchn_lname)
-        net[lbatchn_lname] = BatchNormLayer(net.values()[-1], alpha=1.,
-                                            beta=beta, gamma=gamma, name=l_name,
-                                            mean=zero_const, inv_std=one_const)
+        # offset by beta
+        net[lbatchn_lname + '_beta'] = BiasLayer(net.values()[-1], b=beta,
+                                                 name=l_name + '_beta')
 
+        if gamma is not None:
+            # if not rectify, scale by gamma
+            net[lbatchn_lname + '_gamma'] = ScaleLayer(net.values()[-1],
+                                                       scales=gamma,
+                                                       name=l_name + '_gamma')
+        # apply activation
         if i < len(num_hidden) - 1:
             act_name = 'enc_activation_{}'.format(i)
             net[act_name] = NonlinearityLayer(net.values()[-1],
                                               nonlinearity=activation,
                                               name='{}_{}'.format(name, act_name))
 
+    # classfication layer activation -> softmax
     net['enc_softmax'] = NonlinearityLayer(net.values()[-1], nonlinearity=softmax,
                                            name='{}_enc_softmax'.format(name))
 
     return net['enc_softmax'], net
 
 
-def build_decoder(dirty_net, clean_net, num_nodes, sigma,
-                  combinator_type='milaUDEM'):
+def build_decoder(dirty_net, clean_net, num_nodes, sigma, combinator_type):
     L = len(num_nodes) - 1
 
     # dirty_enc_dense_1 ... z_L
     z_L = dirty_net['enc_noise_{}'.format(L)]
-    
+
     # batchnormalized softmax output .. u_0 without learning bn beta, gamma
     dirty_net['u_0'] = BatchNormLayer(dirty_net.values()[-1], beta=None,
                                       gamma=None, name='dec_batchn_softmax')
-    
+
     # denoised latent \hat{z}_L = g(\tilde{z}_L, u_L)
     comb_name = 'dec_combinator_0'
-    dirty_net[comb_name] = CombinatorLayer(*[z_L, dirty_net['u_0']],
+    dirty_net[comb_name] = CombinatorLayer(z_L, dirty_net['u_0'],
                                            combinator_type=combinator_type,
                                            name=comb_name)
-    
+
     # batchnormalize denoised latent using clean encoder's bn mean/inv_std without learning
     enc_bname = 'enc_batchn_{}_norm'.format(L)
-    mu, inv_std = clean_net[enc_bname].get_params()
     bname = 'dec_batchn_0'
-    dirty_net[bname] = BatchNormLayer(dirty_net.values()[-1], alpha=1.,
-                                      beta=None, gamma=None, name=bname,
-                                      mean=mu, inv_std=inv_std)
+
+    to_stats_l = clean_net[enc_bname]
+    to_norm_l = dirty_net[comb_name]
+    dirty_net[bname] = SharedNormLayer(to_stats_l, to_norm_l)
 
     for i in range(L):
         # dirty_enc_dense_L-i ... z_l
         z_l = dirty_net['enc_noise_{}'.format(i)]
-        
+
         # affine transformation
         d_name = 'dec_dense_{}'.format(L-i)
         dirty_net[d_name] = DenseLayer(dirty_net.values()[-1],
                                        num_units=num_nodes[i],
                                        nonlinearity=linear, name=d_name)
-        
+
         # batchnormalization ... u_l
-        dirty_net['u_l'] = BatchNormLayer(dirty_net.values()[-1], beta=None,
-                                          gamma=None,
-                                          name='dec_batchn_dense_{}'.format(L-i))
-        
+        dirty_net['u_{}'.format(i+1)] = BatchNormLayer(dirty_net.values()[-1],
+                                                       alpha=1.,
+                                                       beta=None,gamma=None,
+                                                       name='dec_batchn_dense_'
+                                                            '{}'.format(L-i))
+
         # denoised latent \hat{z}_L-i
         comb_name = 'dec_combinator_{}'.format(i+1)
-        dirty_net[comb_name] = CombinatorLayer(*[z_l, dirty_net['u_l']],
+        dirty_net[comb_name] = CombinatorLayer(z_l, dirty_net['u_{}'.format(i+1)],
                                                combinator_type=combinator_type,
                                                name=comb_name)
-        
+
         # batchnormalized latent \hat{z}_L-i^{BN}
         enc_bname = 'enc_batchn_{}_norm'.format(L-i-1)
-        mu, inv_std = clean_net[enc_bname].get_params()
         bname = 'dec_batchn_{}'.format(L-i)
-        dirty_net[bname] = BatchNormLayer(dirty_net.values()[-1], alpha=1.,
-                                          beta=None, gamma=None, name=bname,
-                                          mean=mu, inv_std=inv_std)
-        
+
+        to_stats_l = clean_net[enc_bname]
+        to_norm_l = dirty_net[comb_name]
+        dirty_net[bname] = SharedNormLayer(to_stats_l, to_norm_l)
+
     # corrupted input ... z_0
     z_0 = dirty_net['inp_corr']
 
@@ -294,13 +337,15 @@ def build_decoder(dirty_net, clean_net, num_nodes, sigma,
     d_name = 'dec_dense_{}'.format(L+1)
     dirty_net[d_name] = DenseLayer(dirty_net.values()[-1], nonlinearity=linear,
                                    num_units=num_nodes[i+1], name=d_name)
-    
+
     # batchnormalization ... u_L
-    dirty_net['u_L'] = BatchNormLayer(dirty_net.values()[-1], beta=None, gamma=None)
-    
+    dirty_net['u_{}'.format(L+1)] = BatchNormLayer(dirty_net.values()[-1], alpha=1.,
+                                                   beta=None, gamma=None)
+
     # denoised input reconstruction
     comb_name = 'dec_combinator_{}'.format(L+1)
-    dirty_net[comb_name] = CombinatorLayer(*[z_0, dirty_net['u_L']], name=comb_name,
+    dirty_net[comb_name] = CombinatorLayer(*[z_0, dirty_net['u_{}'.format(L+1)]],
+                                           name=comb_name,
                                            combinator_type=combinator_type)
 
     return dirty_net
@@ -317,7 +362,7 @@ def build_model(num_encoder, num_decoder, p_drop_input, p_drop_hidden,
 
     # dirty encoder
     train_output_l, dirty_encoder = build_encoder(net, num_encoder, activation,
-                                                  'dirty', p_drop_hidden)
+                                                  'dirty', p_drop_hidden, None)
 
     # clean encoder
     clean_net = OrderedDict(net.items()[:1])
@@ -331,20 +376,49 @@ def build_model(num_encoder, num_decoder, p_drop_input, p_drop_hidden,
     return [train_output_l, eval_output_l], dirty_net, clean_net
 
 
-def build_cost(X, y, num_decoder, dirty_net, clean_net, output_train, lambdas):
-    class_cost = T.nnet.categorical_crossentropy(T.clip(output_train, 1e-15, 1),
-                                                 y).mean()
+def get_mu_sigma_costs(hid):
+    shp = hid.shape
+    mu = hid.mean(0)
+    sigma = T.dot(hid.T, hid) / shp[0]
+
+    C_mu = T.sum(mu ** 2)
+    C_sigma = T.diagonal(sigma - T.log(T.clip(sigma, 1e-15, 1)))
+    C_sigma -=  - T.ones_like(C_sigma)
+    return C_mu, C_sigma.sum() # trace(C_sigma)
+
+
+def build_cost(X, y, num_decoder, dirty_net, clean_net, output_train,
+               lambdas, use_extra_costs=False, alphas=None, betas=None,
+               num_labeled=None, pseudo_labels=None):
+    xe = T.nnet.categorical_crossentropy
+    pred = T.clip(output_train, 1e-15, 1)
+    N = num_labeled if num_labeled else pred.shape[0]
+    class_cost = xe(pred[:N], y[:N]).mean()
+
+    if pseudo_labels == 'soft':
+        n = 0 if num_labeled else N
+        class_cost += xe(pred[n:], pred[n:]).mean()
+    elif pseudo_labels == 'hard':
+        M = y.shape[1]
+        n = 0 if num_labeled else N
+        pseudo_target = T.eye(M)[pred[n:].argmax(axis=1)]
+        class_cost += xe(pred[n:], pseudo_target).mean()
+
     L = len(num_decoder)
-    
+
     # get clean and corresponding dirty latent layer output
     z_clean_l = clean_net['input']
     z_dirty_l = dirty_net['dec_combinator_{}'.format(L)]
-    
+
     z_clean = lasagne.layers.get_output(z_clean_l, X, deterministic=False)
     z_dirty = lasagne.layers.get_output(z_dirty_l, X, deterministic=False)
 
     # squared error
-    rec_costs = [lambdas[L] * T.sqr(z_clean - z_dirty).mean()]
+    cost = lambdas[L] * T.sqr(z_clean - z_dirty).mean()
+    if use_extra_costs:
+        C_mu, C_sigma = get_mu_sigma_costs(z_clean)
+        cost += alphas[L] * C_mu + betas[L] * C_sigma
+    rec_costs = [cost]
 
     for l in range(L):
         z_clean_l = clean_net['enc_batchn_{}_norm'.format(l)]
@@ -353,6 +427,10 @@ def build_cost(X, y, num_decoder, dirty_net, clean_net, output_train, lambdas):
         z_clean = lasagne.layers.get_output(z_clean_l, X, deterministic=False)
         z_dirty = lasagne.layers.get_output(z_dirty_l, X, deterministic=False)
 
-        rec_costs.append(lambdas[l] * T.sqr(z_clean - z_dirty).mean())
+        cost = lambdas[l] * T.sqr(z_clean - z_dirty).mean()
+        if use_extra_costs:
+            C_mu, C_sigma = get_mu_sigma_costs(z_clean)
+            cost += alphas[l] * C_mu + betas[l] * C_sigma
+        rec_costs.append(cost)
 
     return class_cost, rec_costs

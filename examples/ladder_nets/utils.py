@@ -1,3 +1,8 @@
+# %load utils.py
+import theano
+import theano.tensor as T
+import lasagne
+
 import gzip
 import cPickle as pickle
 import sys

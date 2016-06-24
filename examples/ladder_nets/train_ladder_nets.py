@@ -1,14 +1,22 @@
-
+from utils import load_data
+from ladder_nets import *
 import time
 import theano.misc.pkl_utils
+import lasagne
+import cPickle
 
 LEARNING_RATE = 0.1
 LR_DECREASE = 1.
 BATCH_SIZE = 100
 NUM_EPOCHS = 15
 COMBINATOR_TYPE = 'milaUDEM'
-LAMBDAS = [0.1, 0.1, 0.1]
+LAMBDAS = [1, 1, 1]
 DROPOUT = 0.3
+EXTRA_COST = False # True
+ALPHAS = None, # [0.1]*3
+BETAS = None, #[0.1]*3
+NUM_LABELED = None
+PSEUDO_LABELS = None
 
 print "Loading data..."
 dataset = load_data()
@@ -35,10 +43,12 @@ output_eval = lasagne.layers.get_output(eval_output_l, X, deterministic=True)
 # set up (possibly amortizable) lr, cost and updates
 sh_lr = theano.shared(lasagne.utils.floatX(LEARNING_RATE))
 
-class_cost, rec_costs = build_cost(X, lasagne.utils.one_hot(y), num_decoder, 
-                                   dirty_net, clean_net, output_train, LAMBDAS)
+class_cost, rec_costs, \
+z_cleans, z_dirties = build_cost(X, lasagne.utils.one_hot(y), num_decoder,
+                                 dirty_net, clean_net, output_train, LAMBDAS,
+                                 use_extra_costs=EXTRA_COST, alphas=ALPHAS, betas=BETAS,
+                                 num_labeled=NUM_LABELED, pseudo_labels=PSEUDO_LABELS)
 cost = class_cost + T.sum(rec_costs)
-
 net_params = lasagne.layers.get_all_params(train_output_l, trainable=True)
 updates = lasagne.updates.adam(cost, net_params, learning_rate=sh_lr)
 
@@ -47,7 +57,7 @@ batch_index = T.iscalar('batch_index')
 batch_slice = slice(batch_index * BATCH_SIZE, (batch_index + 1) * BATCH_SIZE)
 
 pred = T.argmax(output_eval, axis=1)
-accuracy = T.mean(T.eq(pred, y), dtype=theano.config.floatX)
+accuracy = T.mean(T.eq(pred, y[:NUM_LABELED]), dtype=theano.config.floatX)
 
 train = theano.function([batch_index], [cost] + rec_costs,
                         updates=updates, givens={
@@ -59,16 +69,6 @@ eval = theano.function([batch_index], [cost, accuracy], givens={
                            X: dataset['X_valid'][batch_slice],
                            y: dataset['y_valid'][batch_slice],
                        })
-
-# checking for constants in means and inv_stds during training
-bl_name = 'enc_batchn_{}_learn'
-means = [abs(dirty_net[bl_name.format(i)].mean.ravel()).mean() for i
-         in range(len(num_encoder))]
-means = T.stack(means, axis=1)
-stds = [abs(dirty_net[bl_name.format(i)].inv_std.ravel()).mean() for i
-        in range(len(num_encoder))]
-stds = T.stack(stds, axis=1)
-get_stats = theano.function([], [means, stds])
 
 network_dump = {'train_output_layer': train_output_l,
                 'eval_output_layer': eval_output_l,
@@ -88,7 +88,6 @@ def save_dump(filename,param_values):
 def train_epoch():
     costs = []
     rec_costs = []
-    stats = []
     for b in range(num_batches_train):
         train_out = train(b)
         train_cost = train_out[0]
@@ -96,17 +95,13 @@ def train_epoch():
 
         costs.append(train_cost)
         rec_costs.append(rec_cost)
-        stats.append(np.vstack(get_stats()))
 
-    return (np.mean(costs), np.mean(rec_costs, axis=0),
-            np.stack(stats, axis=0).mean(axis=0))
+    return (np.mean(costs), np.mean(rec_costs, axis=0))
     
 
 def eval_epoch():
     costs = []
     accs = []
-    preds = []
-    targets = []
     for b in range(num_batches_valid):
         eval_cost, eval_acc = eval(b)
         costs.append(eval_cost)
@@ -124,7 +119,7 @@ now = time.time()
 
 try:
     for n in range(NUM_EPOCHS):
-        train_cost, rec_costs, stats = train_epoch()
+        train_cost, rec_costs = train_epoch()
         eval_cost, acc = eval_epoch()
         
         train_costs.append(train_cost)
@@ -134,16 +129,11 @@ try:
         print "Epoch %d took %.3f s" % (n + 1, time.time() - now)
         now = time.time()
         print "Train cost {}, val cost {}, val acc {}".format(train_costs[-1], 
-                                                               valid_costs[-1], 
-                                                               valid_accs[-1])
+                                                              valid_costs[-1], 
+                                                              valid_accs[-1])
         print '\n'.join(['Layer #{} rec cost: {}'.format(i, c) for i, c
                  in enumerate(rec_costs)])
-        means, inv_stds = stats
-        for i in range(len(num_encoder)):
-            print '{}: mean == 0. {}, inv_std == 1. {}'.format(bl_name.format(i),
-                                                               np.allclose(means[i], 0.),
-                                                               np.allclose(inv_stds[i], 1.))
-        
+
         if (n+1) % 10 == 0:
             new_lr = sh_lr.get_value() * LR_DECREASE
             print "New LR:", new_lr
