@@ -1,3 +1,11 @@
+# ResNet-50, network from the paper:
+# "Deep Residual Learning for Image Recognition"
+# http://arxiv.org/pdf/1512.03385v1.pdf
+# License: see https://github.com/KaimingHe/deep-residual-networks/blob/master/LICENSE
+
+# Download pretrained weights from:
+# https://s3.amazonaws.com/lasagne/recipes/pretrained/imagenet/resnet50.pkl
+
 import lasagne
 from lasagne.layers import InputLayer
 from lasagne.layers import Conv2DLayer as ConvLayer
