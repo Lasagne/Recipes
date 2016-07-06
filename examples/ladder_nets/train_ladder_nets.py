@@ -81,14 +81,14 @@ accuracy = T.mean(T.eq(pred, y[:NUM_LABELED]), dtype=theano.config.floatX)
 train = theano.function([batch_index], [cost] + rec_costs,
                         updates=updates, givens={
                             X: dataset['X_train'][batch_slice].reshape(
-                               (-1, 1, 28, 28)
+                               (-1,) + tuple(input_shape)
                            ),
                             y: dataset['y_train'][batch_slice],
                         })
 
 eval = theano.function([batch_index], [cost, accuracy], givens={
                            X: dataset['X_valid'][batch_slice].reshape(
-                               (-1, 1, 28, 28)
+                               (-1,) + tuple(input_shape)
                            ),
                            y: dataset['y_valid'][batch_slice],
                        })
