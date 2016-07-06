@@ -4,50 +4,69 @@ import time
 import theano.misc.pkl_utils
 import lasagne
 import cPickle
+import numpy as np
 
 LEARNING_RATE = 0.1
 LR_DECREASE = 1.
 BATCH_SIZE = 100
+INPUT_SHAPE = [1, 28, 28]
 NUM_EPOCHS = 15
 COMBINATOR_TYPE = 'milaUDEM'
 LAMBDAS = [1, 1, 1]
 DROPOUT = 0.3
 EXTRA_COST = False # True
 ALPHAS = None, # [0.1]*3
-BETAS = None, #[0.1]*3
+BETAS = None, # [0.1]*3
 NUM_LABELED = None
 PSEUDO_LABELS = None
+CONV = True # False
+POOL = True # False
 
 print "Loading data..."
 dataset = load_data()
 
-# build network
-num_encoder = [500, 10]
-num_decoder = [500, 784]
+# build model
+if CONV:
+    input_shape = INPUT_SHAPE
+    if POOL:
+        num_encoder = [[40, 8, 0, 1, 2, 2], [10, 8, 0, 1, 2, 2]]
+        num_decoder = [[40, 8, 0, 1, 2, 2], [1, 8, 0, 1, 2, 2]]
+    else:
+        num_encoder = [[40, 15, 0, 1], [10, 14, 0, 1]]
+        num_decoder = [[40, 14, 0, 1], [1, 15, 0, 1]]
+else:
+    input_shape = np.prod(INPUT_SHAPE)
+    num_encoder = [500, 10]
+    num_decoder = [500, input_shape]
 
 print "Building model and compiling functions..."
 [train_output_l, eval_output_l], dirty_net, clean_net = build_model(
-    num_encoder, num_decoder, DROPOUT, DROPOUT, batch_size=None, 
-    inp_size=784, combinator_type=COMBINATOR_TYPE)
+    num_encoder, num_decoder, DROPOUT, DROPOUT, input_shape=input_shape,
+    combinator_type=COMBINATOR_TYPE, convolution=CONV, pooling=POOL)
+
+print map(lambda x: (x.name, x.output_shape), dirty_net.values())
 
 # set up input/output variables
-X = T.fmatrix('X')
+X = T.fmatrix('X') if not CONV else T.ftensor4('x')
 y = T.ivector('y')
 
 # training output
-output_train = lasagne.layers.get_output(train_output_l, X, deterministic=False)
+output_train = lasagne.layers.get_output(train_output_l, X,
+                                         deterministic=False).flatten(2)
 
 # evaluation output. Also includes output of transform for plotting
-output_eval = lasagne.layers.get_output(eval_output_l, X, deterministic=True)
+output_eval = lasagne.layers.get_output(eval_output_l, X,
+                                        deterministic=True).flatten(2)
 
 # set up (possibly amortizable) lr, cost and updates
 sh_lr = theano.shared(lasagne.utils.floatX(LEARNING_RATE))
 
-class_cost, rec_costs, \
-z_cleans, z_dirties = build_cost(X, lasagne.utils.one_hot(y), num_decoder,
-                                 dirty_net, clean_net, output_train, LAMBDAS,
-                                 use_extra_costs=EXTRA_COST, alphas=ALPHAS, betas=BETAS,
-                                 num_labeled=NUM_LABELED, pseudo_labels=PSEUDO_LABELS)
+class_cost, rec_costs = build_cost(X, lasagne.utils.one_hot(y), num_decoder,
+                                   dirty_net, clean_net, output_train,
+                                   LAMBDAS, use_extra_costs=EXTRA_COST,
+                                   alphas=ALPHAS, betas=BETAS,
+                                   num_labeled=NUM_LABELED,
+                                   pseudo_labels=PSEUDO_LABELS)
 cost = class_cost + T.sum(rec_costs)
 net_params = lasagne.layers.get_all_params(train_output_l, trainable=True)
 updates = lasagne.updates.adam(cost, net_params, learning_rate=sh_lr)
@@ -61,12 +80,16 @@ accuracy = T.mean(T.eq(pred, y[:NUM_LABELED]), dtype=theano.config.floatX)
 
 train = theano.function([batch_index], [cost] + rec_costs,
                         updates=updates, givens={
-                            X: dataset['X_train'][batch_slice],
+                            X: dataset['X_train'][batch_slice].reshape(
+                               (-1, 1, 28, 28)
+                           ),
                             y: dataset['y_train'][batch_slice],
                         })
 
 eval = theano.function([batch_index], [cost, accuracy], givens={
-                           X: dataset['X_valid'][batch_slice],
+                           X: dataset['X_valid'][batch_slice].reshape(
+                               (-1, 1, 28, 28)
+                           ),
                            y: dataset['y_valid'][batch_slice],
                        })
 
@@ -108,6 +131,7 @@ def eval_epoch():
         accs.append(eval_acc)
 
     return np.mean(eval_cost), np.mean(eval_acc)
+
 
 num_batches_train = dataset['num_examples_train'] // BATCH_SIZE
 num_batches_valid = dataset['num_examples_valid'] // BATCH_SIZE

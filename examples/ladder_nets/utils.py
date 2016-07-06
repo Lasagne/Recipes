@@ -1,14 +1,12 @@
-# %load utils.py
+import gzip
+import cPickle as pickle
 import theano
 import theano.tensor as T
 import lasagne
 
-import gzip
-import cPickle as pickle
-import sys
-
 def pickle_load(f, encoding):
     return pickle.load(f)
+
 
 def load_data():
     """Get data with labels, split into training, validation and test set."""
@@ -31,3 +29,13 @@ def load_data():
         input_dim=X_train.shape[1],
         output_dim=10,
     )
+
+
+def softmax(vec, axis=1):
+    """
+     The ND implementation of softmax nonlinearity applied over a specified
+     axis, which is by default the second dimension.
+    """
+    xdev = vec - vec.max(axis, keepdims=True)
+    rval = T.exp(xdev)/(T.exp(xdev).sum(axis, keepdims=True))
+    return rval
