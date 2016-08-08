@@ -187,6 +187,6 @@ def build_network():
     net['pool3'] = GlobalPoolLayer(net['mixed_10/join'])
 
     net['softmax'] = DenseLayer(
-        net['pool3'], num_units=1008, nonlinearity=softmax)
+        net['pool3'], num_units=1000, nonlinearity=softmax)
 
     return net
