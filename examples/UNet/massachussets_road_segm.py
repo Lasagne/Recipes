@@ -106,7 +106,7 @@ def batch_generator(data, target, BATCH_SIZE):
     idx = np.arange(data.shape[0])
     while True:
         ids = np.random.choice(idx, BATCH_SIZE)
-        yield data[ids], target[ids]
+        yield np.array(data[ids]), np.array(target[ids])
 
 def random_crop_generator(generator, crop_size=(128, 128)):
     '''
@@ -177,24 +177,28 @@ def prepare_dataset():
         print "something went wrong, maybe the download?"
 
 
-def plot_some_results(pred_fn, test_generator, BATCH_SIZE):
+def plot_some_results(pred_fn, test_generator, BATCH_SIZE, PATCH_SIZE = 192):
     fig_ctr = 0
     ctr = 0
     for data, seg in test_generator:
-        res = pred_fn(data).argmax(-1).reshape(BATCH_SIZE, 1, 128+64, 128+64)
-        for d, s, r in zip(data, seg, res):
+        pred = pred_fn(data)
+        res = pred.argmax(-1).reshape(BATCH_SIZE, 1, PATCH_SIZE, PATCH_SIZE)
+        prob = pred.transpose(1, 0).reshape(2, BATCH_SIZE, PATCH_SIZE, PATCH_SIZE)[1]
+        for d, s, r, p in zip(data, seg, res, prob):
             plt.figure(figsize=(12, 6))
-            plt.subplot(1, 3, 1)
+            plt.subplot(1, 4, 1)
             plt.imshow(d.transpose(1,2,0))
-            plt.subplot(1, 3, 2)
+            plt.subplot(1, 4, 2)
             plt.imshow(s[0])
-            plt.subplot(1, 3, 3)
+            plt.subplot(1, 4, 3)
             plt.imshow(r[0])
+            plt.subplot(1, 4, 4)
+            plt.imshow(p)
             plt.savefig("road_segmentation_result_%03.0f.png"%fig_ctr)
             plt.close()
             fig_ctr += 1
         ctr += 1
-        if ctr > 10:
+        if ctr > 5:
             break
 
 
@@ -229,7 +233,10 @@ def main():
     output_layer = net["output"]
 
     # if you wish to load pretrained weights you can uncomment this code and modify the file name
-    '''with open("UNet_params_noBN_ep%03.0f.pkl"%10, 'r') as f:
+    # if you want, use my pretained weights (got around 96% accuracy and a loss of 0.11 using excessive data
+    # augmentation)
+    # https://www.dropbox.com/s/t6juf6o2ix7dntk/UNet_roadSegmentation_Params.zip?dl=0
+    '''with open("UNet_params_ep0.pkl", 'r') as f:
         params = cPickle.load(f)
         lasagne.layers.set_all_param_values(output_layer, params)'''
 
@@ -319,7 +326,7 @@ def main():
             if n_batches > N_BATCHES_PER_EPOCH_valid:
                 break
         print "val accuracy: ", np.mean(accuracies_val), " val loss: ", np.mean(losses_val)
-        learning_rate *= 0.5
+        learning_rate *= 0.2
         # save trained weights after each epoch
         with open("UNet_params_ep%03.0f.pkl"%epoch, 'w') as f:
             cPickle.dump(lasagne.layers.get_all_param_values(output_layer), f)

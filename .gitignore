@@ -64,7 +64,7 @@ examples/UNet/data*
 examples/UNet/*.sh
 examples/UNet/*.npy
 examples/UNet/*.pkl
-examples/UNet/tmp*
-examples/UNet/best_parameters*
+examples/UNet/*.png
+examples/UNet/readme.txt
 .gitignore~
 
