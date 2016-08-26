@@ -52,12 +52,14 @@ def main():
     # (if you have, copy your repository including the data to an SSD, otherwise it will take a long time to
     # generate batches)
     mmap_mode = None
-    data_train = np.load("train_data.npy", mmap_mode=mmap_mode)
-    target_train = np.load("train_target.npy", mmap_mode=mmap_mode)
-    data_valid = np.load("valid_data.npy", mmap_mode=mmap_mode)
-    target_valid= np.load("valid_target.npy", mmap_mode=mmap_mode)
-    data_test = np.load("test_data.npy", mmap_mode=mmap_mode)
-    target_test = np.load("test_target.npy", mmap_mode=mmap_mode)
+    dataset = np.load("road_segm_dataset.npz", mmap_mode=mmap_mode)
+    data_train = dataset["data_train"]
+    target_train = dataset["target_train"]
+    data_valid = dataset["data_valid"]
+    target_valid = dataset["target_valid"]
+    data_test = dataset["data_test"]
+    target_test = dataset["target_test"]
+
 
     # we are using pad='same' for simplicity (otherwise we would have to crop our ground truth).
     net = build_UNet(n_input_channels=3, BATCH_SIZE=BATCH_SIZE, num_output_classes=2, pad='same',
@@ -141,7 +143,7 @@ def main():
         for data, target in train_generator:
             # the output of the net has shape (BATCH_SIZE, N_CLASSES). We therefore need to flatten the segmentation so
             # that we can match it with the prediction via the crossentropy loss function
-            target_flat = target.flatten()
+            target_flat = target.ravel()
             loss, acc = train_fn(data.astype(np.float32), target_flat)
             losses_train.append(loss)
             accuracies_train.append(acc)
@@ -154,7 +156,7 @@ def main():
         accuracies_val = []
         n_batches = 0
         for data, target in validation_generator:
-            target_flat = target.flatten()
+            target_flat = target.ravel()
             loss, acc = val_fn(data.astype(np.float32), target_flat)
             losses_val.append(loss)
             accuracies_val.append(acc)
