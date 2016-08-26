@@ -8,7 +8,7 @@ def batch_generator(data, target, BATCH_SIZE, shuffle=False):
     np.random.seed()
     idx = np.arange(data.shape[0])
     if shuffle:
-        np.random.shuffle()
+        np.random.shuffle(idx)
     idx_2 = np.array(idx)
     # if BATCH_SIZE is larger than len(data) we need to artificially enlarge the idx array (loop around)
     while BATCH_SIZE > len(idx):
