@@ -1,12 +1,12 @@
 __author__ = 'Fabian Isensee'
-import numpy as np
 import os
 import sys
 import fnmatch
 import matplotlib.pyplot as plt
 sys.path.append("../../modelzoo/")
-from time import sleep
 from generators import *
+from multiprocessing.dummy import Pool
+from urllib import urlretrieve
 
 def prep_folders():
     if not os.path.isdir("data"):
@@ -45,37 +45,32 @@ def prep_urls():
     test_data_str = "https://www.cs.toronto.edu/~vmnih/data/mass_roads/test/sat/"
     test_target_str = "https://www.cs.toronto.edu/~vmnih/data/mass_roads/test/map/"
 
-    f = open("mass_roads_train_data_download.sh", 'w')
-    g = open("mass_roads_train_target_download.sh", 'w')
+    all_tasks = []
+
+    # save url along with the filename for each file
     for img_name in train_data_url:
-        f.write("wget -O data/training/sat_img/%sf "%img_name + train_data_str + img_name + "f" + "\n")
-        g.write("wget -O data/training/map/%s "%img_name + train_target_str + img_name + "\n")
-    f.close()
-    g.close()
+        all_tasks.append(tuple([train_data_str + img_name + "f", "data/training/sat_img/%sf"%img_name]))
+        all_tasks.append(tuple([train_target_str + img_name, "data/training/map/%s"%img_name]))
 
-    f = open("mass_roads_validation_data_download.sh", 'w')
-    g = open("mass_roads_validation_target_download.sh", 'w')
     for img_name in valid_data_url:
-        f.write("wget -O data/validation/sat_img/%s "%img_name + valid_data_str + img_name + "\n")
-        g.write("wget -O data/validation/map/%s "%img_name[:-1] + valid_target_str + img_name[:-1] + "\n")
-    f.close()
-    g.close()
+        all_tasks.append(tuple([valid_data_str + img_name, "data/validation/sat_img/%s"%img_name]))
+        all_tasks.append(tuple([valid_target_str + img_name[:-1], "data/validation/map/%s"%img_name[:-1]]))
 
-    f = open("mass_roads_test_data_download.sh", 'w')
-    g = open("mass_roads_test_target_download.sh", 'w')
     for img_name in test_data_url:
-        f.write("wget -O data/test/sat_img/%s "%img_name + test_data_str + img_name + "\n")
-        g.write("wget -O data/test/map/%s "%img_name[:-1] + test_target_str + img_name[:-1] + "\n")
-    f.close()
-    g.close()
+        all_tasks.append(tuple([test_data_str + img_name, "data/test/sat_img/%s"%img_name]))
+        all_tasks.append(tuple([test_target_str + img_name[:-1], "data/test/map/%s"%img_name[:-1]]))
 
-def download_dataset():
-    os.system("sh mass_roads_train_data_download.sh &")
-    os.system("sh mass_roads_train_target_download.sh &")
-    os.system("sh mass_roads_validation_data_download.sh &")
-    os.system("sh mass_roads_validation_target_download.sh &")
-    os.system("sh mass_roads_test_data_download.sh &")
-    os.system("sh mass_roads_test_target_download.sh &")
+    return all_tasks
+
+def download_dataset(all_tasks, num_workers=4):
+    def urlretrieve_star(args):
+        return urlretrieve(*args)
+
+    pool = Pool(num_workers)
+    pool.map(urlretrieve_star, all_tasks)
+    pool.close()
+    pool.join()
+
 
 def load_data(folder):
     images_sat = [img for img in os.listdir(os.path.join(folder, "sat_img")) if fnmatch.fnmatch(img, "*.tif*")]
@@ -96,13 +91,9 @@ def load_data(folder):
 
 def prepare_dataset():
     prep_folders()
-    prep_urls()
-    download_dataset()
-    # the dataset is now downloaded in the background. Once every few seconds we check if the download is done. We do
-    # this by checking whether tha last training image exists
-    while not os.path.isfile("data/training/map/99238675_15.tiff") and not os.path.isfile("data/training/sat_img/99238675_15.tiff"):
-        print "download seems to be running..."
-        sleep(5)
+    all_tasks = prep_urls()
+    download_dataset(all_tasks)
+
     print "download done..."
     try:
         data_train, target_train = load_data("data/training")
@@ -117,3 +108,6 @@ def prepare_dataset():
         np.save("test_target.npy", target_test)
     except:
         print "something went wrong, maybe the download?"
+
+if __name__ == "__main__":
+    prepare_dataset()
