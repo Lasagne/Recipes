@@ -21,6 +21,22 @@ def batch_generator(data, target, BATCH_SIZE, shuffle=False):
         if ctr >= data.shape[0]:
             ctr -= data.shape[0]
 
+
+def center_crop_generator(generator, output_size):
+    '''
+    yields center crop of size output_size (may be 1d or 2d) from data and seg
+    '''
+    if type(output_size) not in (tuple, list):
+        center_crop = [output_size, output_size]
+    elif len(output_size) == 2:
+        center_crop = list(output_size)
+    else:
+        raise ValueError("invalid output_size")
+    for data, seg in generator:
+        center = np.array(data.shape[2:])/2
+        yield data[:, :, int(center[0]-center_crop[0]/2.):int(center[0]+center_crop[0]/2.), int(center[1]-center_crop[1]/2.):int(center[1]+center_crop[1]/2.)], seg[:, :, int(center[0]-center_crop[0]/2.):int(center[0]+center_crop[0]/2.), int(center[1]-center_crop[1]/2.):int(center[1]+center_crop[1]/2.)]
+
+
 def random_crop_generator(generator, crop_size=(128, 128)):
     '''
     yields a random crop of size crop_size

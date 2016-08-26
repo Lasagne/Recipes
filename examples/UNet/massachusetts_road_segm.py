@@ -11,7 +11,7 @@ import theano.tensor as T
 import theano
 import cPickle
 from time import sleep
-from generators import batch_generator, threaded_generator, random_crop_generator
+from generators import batch_generator, threaded_generator, random_crop_generator, center_crop_generator
 from massachusetts_road_dataset_utils import prepare_dataset
 
 def plot_some_results(pred_fn, test_generator, BATCH_SIZE, PATCH_SIZE = 192, n_images=10):
@@ -124,12 +124,12 @@ def main():
 
     # some data augmentation. If you want better results you should invest more effort here. I left rotations and
     # deformations out for the sake of speed and simplicity
-    train_generator = random_crop_generator(batch_generator(data_train, target_train, BATCH_SIZE), PATCH_SIZE)
+    train_generator = random_crop_generator(batch_generator(data_train, target_train, BATCH_SIZE, shuffle=True), PATCH_SIZE)
     train_generator = threaded_generator(train_generator, num_cached=10)
 
     # there is no need for data augmentation on the validation. However we need patches of the same size which is why
     # we are using the random crop generator here again
-    validation_generator = random_crop_generator(batch_generator(data_valid, target_valid, BATCH_SIZE), PATCH_SIZE)
+    validation_generator = center_crop_generator(batch_generator(data_valid, target_valid, BATCH_SIZE, shuffle=False), PATCH_SIZE)
     validation_generator = threaded_generator(validation_generator, num_cached=10)
 
     # do the actual training
