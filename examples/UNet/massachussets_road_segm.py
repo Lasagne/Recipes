@@ -177,29 +177,23 @@ def prepare_dataset():
         print "something went wrong, maybe the download?"
 
 
-def plot_some_results(pred_fn, test_generator, BATCH_SIZE, PATCH_SIZE = 192):
+def plot_some_results(pred_fn, test_generator, BATCH_SIZE, PATCH_SIZE = 192, n_images=10):
     fig_ctr = 0
-    ctr = 0
     for data, seg in test_generator:
-        pred = pred_fn(data)
-        res = pred.argmax(-1).reshape(BATCH_SIZE, 1, PATCH_SIZE, PATCH_SIZE)
-        prob = pred.transpose(1, 0).reshape(2, BATCH_SIZE, PATCH_SIZE, PATCH_SIZE)[1]
-        for d, s, r, p in zip(data, seg, res, prob):
+        res = pred_fn(data)
+        for d, s, r, p in zip(data, seg, res):
             plt.figure(figsize=(12, 6))
-            plt.subplot(1, 4, 1)
+            plt.subplot(1, 3, 1)
             plt.imshow(d.transpose(1,2,0))
-            plt.subplot(1, 4, 2)
+            plt.subplot(1, 3, 2)
             plt.imshow(s[0])
-            plt.subplot(1, 4, 3)
+            plt.subplot(1, 3, 3)
             plt.imshow(r[0])
-            plt.subplot(1, 4, 4)
-            plt.imshow(p)
             plt.savefig("road_segmentation_result_%03.0f.png"%fig_ctr)
             plt.close()
             fig_ctr += 1
-        ctr += 1
-        if ctr > 5:
-            break
+            if fig_ctr > n_images:
+                break
 
 
 def main():
@@ -230,7 +224,7 @@ def main():
     net = build_UNet(n_input_channels=3, BATCH_SIZE=BATCH_SIZE, num_output_classes=2, pad='same',
                      nonlinearity=lasagne.nonlinearities.elu, input_dim=(PATCH_SIZE, PATCH_SIZE),
                      base_n_filters=16, do_dropout=False)
-    output_layer = net["output"]
+    output_layer_for_loss = net["output_flattened"]
 
     # if you wish to load pretrained weights you can uncomment this code and modify the file name
     # if you want, use my pretained weights (got around 96% accuracy and a loss of 0.11 using excessive data
@@ -245,10 +239,10 @@ def main():
     w_sym = T.vector()
 
     # add some weight decay
-    l2_loss = lasagne.regularization.regularize_network_params(output_layer, lasagne.regularization.l2) * 1e-4
+    l2_loss = lasagne.regularization.regularize_network_params(output_layer_for_loss, lasagne.regularization.l2) * 1e-4
 
     # the distinction between prediction_train and test is important only if we enable dropout
-    prediction_train = lasagne.layers.get_output(output_layer, x_sym, deterministic=False)
+    prediction_train = lasagne.layers.get_output(output_layer_for_loss, x_sym, deterministic=False)
     # we could use a binary loss but I stuck with categorical crossentropy so that less code has to be changed if your
     # application has more than two classes
     loss = lasagne.objectives.categorical_crossentropy(prediction_train, seg_sym)
@@ -257,7 +251,7 @@ def main():
     loss += l2_loss
     acc_train = T.mean(T.eq(T.argmax(prediction_train, axis=1), seg_sym), dtype=theano.config.floatX)
 
-    prediction_test = lasagne.layers.get_output(output_layer, x_sym, deterministic=True)
+    prediction_test = lasagne.layers.get_output(output_layer_for_loss, x_sym, deterministic=True)
     loss_val = lasagne.objectives.categorical_crossentropy(prediction_test, seg_sym)
 
     # we multiply our loss by a weight map. In this example the weight map only increases the loss for road pixels and
@@ -269,14 +263,18 @@ def main():
     acc = T.mean(T.eq(T.argmax(prediction_test, axis=1), seg_sym), dtype=theano.config.floatX)
 
     # learning rate has to be a shared variablebecause we decrease it with every epoch
-    params = lasagne.layers.get_all_params(output_layer, trainable=True)
+    params = lasagne.layers.get_all_params(output_layer_for_loss, trainable=True)
     learning_rate = theano.shared(np.float32(0.001))
     updates = lasagne.updates.adam(loss, params, learning_rate=learning_rate)
 
+    # create a convenience function to get the segmentation
+    seg_output = lasagne.layers.get_output(net["output_segmentation"], x_sym)
+    seg_output = seg_output.argmax(1)
+
     train_fn = theano.function([x_sym, seg_sym, w_sym], [loss, acc_train], updates=updates)
     val_fn = theano.function([x_sym, seg_sym, w_sym], [loss_val, acc])
-    # have a look at plot_some_results if you want  to see how to use pred_fn
-    pred_fn = theano.function([x_sym], prediction_test)
+    get_segmentation = theano.function([x_sym], seg_output)
+
 
     # this is np.sum(target_train == 0) and np.sum(target_train == 1). No need to compute this every time
     class_frequencies = np.array([2374093357., 118906643.])
@@ -329,11 +327,11 @@ def main():
         learning_rate *= 0.2
         # save trained weights after each epoch
         with open("UNet_params_ep%03.0f.pkl"%epoch, 'w') as f:
-            cPickle.dump(lasagne.layers.get_all_param_values(output_layer), f)
+            cPickle.dump(lasagne.layers.get_all_param_values(output_layer_for_loss), f)
 
     # create some png files showing (raw image, ground truth, prediction). Of course we use the test set here ;-)
     test_gen = random_crop_generator(batch_generator(data_test, target_test, BATCH_SIZE), PATCH_SIZE)
-    plot_some_results(pred_fn, test_gen, BATCH_SIZE)
+    plot_some_results(get_segmentation, test_gen, BATCH_SIZE)
 
 
 if __name__ == "__main__":
