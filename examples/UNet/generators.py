@@ -1,21 +1,30 @@
 __author__ = 'Fabian Isensee'
 import numpy as np
 
-def batch_generator(data, target, BATCH_SIZE):
+def batch_generator(data, target, BATCH_SIZE, shuffle=False):
     '''
     just a simple batch iterator, no cropping, no rotation, no anything
     '''
     np.random.seed()
     idx = np.arange(data.shape[0])
+    if shuffle:
+        np.random.shuffle()
+    idx_2 = np.array(idx)
+    # if BATCH_SIZE is larger than len(data) we need to artificially enlarge the idx array (loop around)
+    while BATCH_SIZE > len(idx):
+        idx_2 = np.concatenate((idx_2, idx))
+    del(idx)
     while True:
-        ids = np.random.choice(idx, BATCH_SIZE)
-        yield np.array(data[ids]), np.array(target[ids])
+        ctr = 0
+        yield np.array(data[idx_2[ctr:ctr+BATCH_SIZE]]), np.array(target[idx_2[ctr:ctr+BATCH_SIZE]])
+        ctr += BATCH_SIZE
+        if ctr >= data.shape[0]:
+            ctr -= data.shape[0]
 
 def random_crop_generator(generator, crop_size=(128, 128)):
     '''
     yields a random crop of size crop_size
     '''
-    np.random.seed()
     if type(crop_size) not in (tuple, list):
         crop_size = [crop_size, crop_size]
     elif len(crop_size) == 2:

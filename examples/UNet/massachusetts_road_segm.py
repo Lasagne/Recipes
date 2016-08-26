@@ -47,24 +47,35 @@ def main():
 
     # load the prepared data. They have been converted to np arrays because they are much faster to load than single image files.
     # you will need some ram in order to have everything in memory.
-    # TODO is it worth the effort to refactor everything so that we use memmaps?
-    data_train = np.load("train_data.npy")
-    target_train = np.load("train_target.npy")
-    data_valid = np.load("valid_data.npy")
-    target_valid= np.load("valid_target.npy")
-    data_test = np.load("test_data.npy")
-    target_test = np.load("test_target.npy")
+    # If you are having RAM issues, change mmap_mode to 'r'. This will not load the entire array into memory but rather
+    # read from disk the bits that we currently need
+    # (if you have, copy your repository including the data to an SSD, otherwise it will take a long time to
+    # generate batches)
+    mmap_mode = None
+    data_train = np.load("train_data.npy", mmap_mode=mmap_mode)
+    target_train = np.load("train_target.npy", mmap_mode=mmap_mode)
+    data_valid = np.load("valid_data.npy", mmap_mode=mmap_mode)
+    target_valid= np.load("valid_target.npy", mmap_mode=mmap_mode)
+    data_test = np.load("test_data.npy", mmap_mode=mmap_mode)
+    target_test = np.load("test_target.npy", mmap_mode=mmap_mode)
 
     # we are using pad='same' for simplicity (otherwise we would have to crop our ground truth).
-    # Did not test for other paddings TODO
     net = build_UNet(n_input_channels=3, BATCH_SIZE=BATCH_SIZE, num_output_classes=2, pad='same',
                      nonlinearity=lasagne.nonlinearities.elu, input_dim=(PATCH_SIZE, PATCH_SIZE),
                      base_n_filters=16, do_dropout=False)
     output_layer_for_loss = net["output_flattened"]
 
+    # this is np.sum(target_train == 0) and np.sum(target_train == 1). No need to compute this every time
+    class_frequencies = np.array([2374093357., 118906643.])
+    # we are taking the log here because we want the net to focus more on the road pixels but not too much (otherwise
+    # it would not be penalized enough for missclassifying terrain pixels which results in too many false positives)
+    class_weights = np.log(class_frequencies[[1,0]])
+    class_weights = class_weights / np.sum(class_weights) * 2.
+    class_weights = class_weights.astype(np.float32)
+
     # if you wish to load pretrained weights you can uncomment this code and modify the file name
     # if you want, use my pretained weights (got around 96% accuracy and a loss of 0.11 using excessive data
-    # augmentation)
+    # augmentation: cropping, rotation, elastic deformation)
     # https://www.dropbox.com/s/t6juf6o2ix7dntk/UNet_roadSegmentation_Params.zip?dl=0
     '''with open("UNet_params_ep0.pkl", 'r') as f:
         params = cPickle.load(f)
@@ -72,7 +83,7 @@ def main():
 
     x_sym = T.tensor4()
     seg_sym = T.ivector()
-    w_sym = T.vector()
+    w_sym = class_weights[seg_sym]
 
     # add some weight decay
     l2_loss = lasagne.regularization.regularize_network_params(output_layer_for_loss, lasagne.regularization.l2) * 1e-4
@@ -107,18 +118,9 @@ def main():
     seg_output = lasagne.layers.get_output(net["output_segmentation"], x_sym)
     seg_output = seg_output.argmax(1)
 
-    train_fn = theano.function([x_sym, seg_sym, w_sym], [loss, acc_train], updates=updates)
-    val_fn = theano.function([x_sym, seg_sym, w_sym], [loss_val, acc])
+    train_fn = theano.function([x_sym, seg_sym], [loss, acc_train], updates=updates)
+    val_fn = theano.function([x_sym, seg_sym], [loss_val, acc])
     get_segmentation = theano.function([x_sym], seg_output)
-
-
-    # this is np.sum(target_train == 0) and np.sum(target_train == 1). No need to compute this every time
-    class_frequencies = np.array([2374093357., 118906643.])
-    # we are taking the log here because we want the net to focus more on the road pixels but not too much (otherwise
-    # it would not be penalized enough for missclassifying terrain pixels which results in too many false positives)
-    class_weights = np.log(class_frequencies[[1,0]])
-    class_weights = class_weights / np.sum(class_weights) * 2.
-    class_weights = class_weights.astype(np.float32)
 
     # some data augmentation. If you want better results you should invest more effort here. I left rotations and
     # deformations out for the sake of speed and simplicity
@@ -140,7 +142,7 @@ def main():
             # the output of the net has shape (BATCH_SIZE, N_CLASSES). We therefore need to flatten the segmentation so
             # that we can match it with the prediction via the crossentropy loss function
             target_flat = target.flatten()
-            loss, acc = train_fn(data.astype(np.float32), target_flat, class_weights[target_flat])
+            loss, acc = train_fn(data.astype(np.float32), target_flat)
             losses_train.append(loss)
             accuracies_train.append(acc)
             n_batches += 1
@@ -153,7 +155,7 @@ def main():
         n_batches = 0
         for data, target in validation_generator:
             target_flat = target.flatten()
-            loss, acc = val_fn(data.astype(np.float32), target_flat, class_weights[target_flat])
+            loss, acc = val_fn(data.astype(np.float32), target_flat)
             losses_val.append(loss)
             accuracies_val.append(acc)
             n_batches += 1
