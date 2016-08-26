@@ -34,7 +34,7 @@ def plot_some_results(pred_fn, test_generator, BATCH_SIZE, PATCH_SIZE = 192, n_i
 
 def main():
     # only download dataset once. This takes a while.
-    if not os.path.isfile("test_target.npy"):
+    if not os.path.isfile("road_segm_dataset.npz"):
         # heuristic that I included to make sure the dataset is only donwloaded and prepared once
         prepare_dataset()
 
@@ -85,7 +85,7 @@ def main():
 
     x_sym = T.tensor4()
     seg_sym = T.ivector()
-    w_sym = class_weights[seg_sym]
+    w_sym = T.vector()
 
     # add some weight decay
     l2_loss = lasagne.regularization.regularize_network_params(output_layer_for_loss, lasagne.regularization.l2) * 1e-4
@@ -120,8 +120,8 @@ def main():
     seg_output = lasagne.layers.get_output(net["output_segmentation"], x_sym)
     seg_output = seg_output.argmax(1)
 
-    train_fn = theano.function([x_sym, seg_sym], [loss, acc_train], updates=updates)
-    val_fn = theano.function([x_sym, seg_sym], [loss_val, acc])
+    train_fn = theano.function([x_sym, seg_sym, w_sym], [loss, acc_train], updates=updates)
+    val_fn = theano.function([x_sym, seg_sym, w_sym], [loss_val, acc])
     get_segmentation = theano.function([x_sym], seg_output)
 
     # some data augmentation. If you want better results you should invest more effort here. I left rotations and
@@ -144,7 +144,7 @@ def main():
             # the output of the net has shape (BATCH_SIZE, N_CLASSES). We therefore need to flatten the segmentation so
             # that we can match it with the prediction via the crossentropy loss function
             target_flat = target.ravel()
-            loss, acc = train_fn(data.astype(np.float32), target_flat)
+            loss, acc = train_fn(data.astype(np.float32), target_flat, class_weights[target_flat])
             losses_train.append(loss)
             accuracies_train.append(acc)
             n_batches += 1
@@ -157,7 +157,7 @@ def main():
         n_batches = 0
         for data, target in validation_generator:
             target_flat = target.ravel()
-            loss, acc = val_fn(data.astype(np.float32), target_flat)
+            loss, acc = val_fn(data.astype(np.float32), target_flat, class_weights[target_flat])
             losses_val.append(loss)
             accuracies_val.append(acc)
             n_batches += 1

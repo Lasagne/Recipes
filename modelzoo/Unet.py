@@ -52,7 +52,7 @@ def build_UNet(n_input_channels=1, BATCH_SIZE=None, num_output_classes=2, pad='s
     net['expand_4_2'] = ConvLayer(net['expand_4_1'], base_n_filters, 3, nonlinearity=nonlinearity, pad=pad)
 
     net['output_segmentation'] = ConvLayer(net['expand_4_2'], num_output_classes, 1, nonlinearity=None)
-    net['dimshuffle'] = DimshuffleLayer(net['segLayer'], (1, 0, 2, 3))
+    net['dimshuffle'] = DimshuffleLayer(net['output_segmentation'], (1, 0, 2, 3))
     net['reshapeSeg'] = ReshapeLayer(net['dimshuffle'], (num_output_classes, -1))
     net['dimshuffle2'] = DimshuffleLayer(net['reshapeSeg'], (1, 0))
     net['output_flattened'] = NonlinearityLayer(net['dimshuffle2'], nonlinearity=lasagne.nonlinearities.softmax)
