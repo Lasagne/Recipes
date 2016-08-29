@@ -30,24 +30,24 @@ def build_UNet(n_input_channels=1, BATCH_SIZE=None, num_output_classes=2, pad='s
 
     net['encode_1'] = ConvLayer(l, base_n_filters*16, 3, nonlinearity=nonlinearity, pad=pad)
     net['encode_2'] = ConvLayer(net['encode_1'], base_n_filters*16, 3, nonlinearity=nonlinearity, pad=pad)
-    net['deconv1'] = Upscale2DLayer(net['encode_2'], 2)
+    net['upscale1'] = Upscale2DLayer(net['encode_2'], 2)
 
-    net['concat1'] = ConcatLayer([net['deconv1'], net['contr_4_2']], cropping=(None, None, "center", "center"))
+    net['concat1'] = ConcatLayer([net['upscale1'], net['contr_4_2']], cropping=(None, None, "center", "center"))
     net['expand_1_1'] = ConvLayer(net['concat1'], base_n_filters*8, 3, nonlinearity=nonlinearity, pad=pad)
     net['expand_1_2'] = ConvLayer(net['expand_1_1'], base_n_filters*8, 3, nonlinearity=nonlinearity, pad=pad)
-    net['deconv2'] = Upscale2DLayer(net['expand_1_2'], 2)
+    net['upscale2'] = Upscale2DLayer(net['expand_1_2'], 2)
 
-    net['concat2'] = ConcatLayer([net['deconv2'], net['contr_3_2']], cropping=(None, None, "center", "center"))
+    net['concat2'] = ConcatLayer([net['upscale2'], net['contr_3_2']], cropping=(None, None, "center", "center"))
     net['expand_2_1'] = ConvLayer(net['concat2'], base_n_filters*4, 3, nonlinearity=nonlinearity, pad=pad)
     net['expand_2_2'] = ConvLayer(net['expand_2_1'], base_n_filters*4, 3, nonlinearity=nonlinearity, pad=pad)
-    net['deconv3'] = Upscale2DLayer(net['expand_2_2'], 2)
+    net['upscale3'] = Upscale2DLayer(net['expand_2_2'], 2)
 
-    net['concat3'] = ConcatLayer([net['deconv3'], net['contr_2_2']], cropping=(None, None, "center", "center"))
+    net['concat3'] = ConcatLayer([net['upscale3'], net['contr_2_2']], cropping=(None, None, "center", "center"))
     net['expand_3_1'] = ConvLayer(net['concat3'], base_n_filters*2, 3, nonlinearity=nonlinearity, pad=pad)
     net['expand_3_2'] = ConvLayer(net['expand_3_1'], base_n_filters*2, 3, nonlinearity=nonlinearity, pad=pad)
-    net['deconv4'] = Upscale2DLayer(net['expand_3_2'], 2)
+    net['upscale4'] = Upscale2DLayer(net['expand_3_2'], 2)
 
-    net['concat4'] = ConcatLayer([net['deconv4'], net['contr_1_2']], cropping=(None, None, "center", "center"))
+    net['concat4'] = ConcatLayer([net['upscale4'], net['contr_1_2']], cropping=(None, None, "center", "center"))
     net['expand_4_1'] = ConvLayer(net['concat4'], base_n_filters, 3, nonlinearity=nonlinearity, pad=pad)
     net['expand_4_2'] = ConvLayer(net['expand_4_1'], base_n_filters, 3, nonlinearity=nonlinearity, pad=pad)
 
