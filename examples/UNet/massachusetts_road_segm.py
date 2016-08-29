@@ -77,9 +77,9 @@ def main():
     # if you want, use my pretained weights:
     # val accuracy:  0.963513  val loss:  0.114994  val AUC score:  0.978996643458
     # https://www.dropbox.com/s/0vasqq491skf9iz/UNet_mass_road_segm_params.zip?dl=0
-    '''with open("UNet_params_ep029.pkl", 'r') as f:
+    with open("UNet_params_ep029.pkl", 'r') as f:
         params = cPickle.load(f)
-        lasagne.layers.set_all_param_values(output_layer, params)'''
+        lasagne.layers.set_all_param_values(output_layer_for_loss, params)
 
     x_sym = T.tensor4()
     seg_sym = T.ivector()
