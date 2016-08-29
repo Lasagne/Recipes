@@ -35,8 +35,8 @@ def plot_some_results(pred_fn, test_generator, n_images=10):
 
 def main():
     # only download dataset once. This takes a while.
-    if not os.path.isfile("road_segm_dataset.npz"):
-        # heuristic that I included to make sure the dataset is only donwloaded and prepared once
+    # heuristic that I included to make sure the dataset is only donwloaded and prepared once
+    if not os.path.isfile("test_target.npy"):
         prepare_dataset()
 
     # set some hyper parameters. You should not have to touch anything if you have 4GB or more VRAM
@@ -58,7 +58,6 @@ def main():
     target_valid = np.load("target_valid.npy", mmap_mode=mmap_mode)
     data_test = np.load("data_test.npy", mmap_mode=mmap_mode)
     target_test = np.load("target_test.npy", mmap_mode=mmap_mode)
-
 
     # we are using pad='same' for simplicity (otherwise we would have to crop our ground truth).
     net = build_UNet(n_input_channels=3, BATCH_SIZE=BATCH_SIZE, num_output_classes=2, pad='same',
@@ -137,7 +136,6 @@ def main():
         n_batches = 0
         accuracies_train = []
         for data, target in train_generator:
-            print n_batches
             # the output of the net has shape (BATCH_SIZE, N_CLASSES). We therefore need to flatten the segmentation so
             # that we can match it with the prediction via the crossentropy loss function
             target_flat = target.ravel()
