@@ -63,6 +63,7 @@ target/
 examples/UNet/data*
 examples/UNet/*.sh
 examples/UNet/*.npz
+examples/UNet/*.npy
 examples/UNet/*.pkl
 examples/UNet/*.png
 examples/UNet/readme.txt

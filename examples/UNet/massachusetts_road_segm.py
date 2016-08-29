@@ -15,18 +15,18 @@ from generators import batch_generator, threaded_generator, random_crop_generato
 from massachusetts_road_dataset_utils import prepare_dataset
 from sklearn.metrics import roc_auc_score
 
-def plot_some_results(pred_fn, test_generator, BATCH_SIZE, PATCH_SIZE = 192, n_images=10):
+def plot_some_results(pred_fn, test_generator, n_images=10):
     fig_ctr = 0
     for data, seg in test_generator:
         res = pred_fn(data)
-        for d, s, r, p in zip(data, seg, res):
+        for d, s, r in zip(data, seg, res):
             plt.figure(figsize=(12, 6))
             plt.subplot(1, 3, 1)
             plt.imshow(d.transpose(1,2,0))
             plt.subplot(1, 3, 2)
             plt.imshow(s[0])
             plt.subplot(1, 3, 3)
-            plt.imshow(r[0])
+            plt.imshow(r)
             plt.savefig("road_segmentation_result_%03.0f.png"%fig_ctr)
             plt.close()
             fig_ctr += 1
@@ -75,10 +75,10 @@ def main():
     class_weights = class_weights.astype(np.float32)
 
     # if you wish to load pretrained weights you can uncomment this code and modify the file name
-    # if you want, use my pretained weights (got around 96% accuracy and a loss of 0.11 using excessive data
-    # augmentation: cropping, rotation, elastic deformation)
-    # https://www.dropbox.com/s/t6juf6o2ix7dntk/UNet_roadSegmentation_Params.zip?dl=0
-    '''with open("UNet_params_ep0.pkl", 'r') as f:
+    # if you want, use my pretained weights:
+    # val accuracy:  0.963513  val loss:  0.114994  val AUC score:  0.978996643458
+    # https://www.dropbox.com/s/0vasqq491skf9iz/UNet_mass_road_segm_params.zip?dl=0
+    '''with open("UNet_params_ep029.pkl", 'r') as f:
         params = cPickle.load(f)
         lasagne.layers.set_all_param_values(output_layer, params)'''
 
@@ -171,7 +171,7 @@ def main():
 
     # create some png files showing (raw image, ground truth, prediction). Of course we use the test set here ;-)
     test_gen = random_crop_generator(batch_generator(data_test, target_test, BATCH_SIZE), PATCH_SIZE)
-    plot_some_results(get_segmentation, test_gen, BATCH_SIZE)
+    plot_some_results(get_segmentation, test_gen, 30)
 
 
 if __name__ == "__main__":
