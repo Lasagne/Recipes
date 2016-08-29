@@ -13,6 +13,7 @@ import cPickle
 from time import sleep
 from generators import batch_generator, threaded_generator, random_crop_generator, center_crop_generator
 from massachusetts_road_dataset_utils import prepare_dataset
+from sklearn.metrics import roc_auc_score
 
 def plot_some_results(pred_fn, test_generator, BATCH_SIZE, PATCH_SIZE = 192, n_images=10):
     fig_ctr = 0
@@ -42,7 +43,6 @@ def main():
     BATCH_SIZE = 24
     N_EPOCHS = 30
     N_BATCHES_PER_EPOCH = 100
-    N_BATCHES_PER_EPOCH_valid = 15
     PATCH_SIZE = 128+64
 
     # load the prepared data. They have been converted to np arrays because they are much faster to load than single image files.
@@ -52,13 +52,12 @@ def main():
     # (if you have, copy your repository including the data to an SSD, otherwise it will take a long time to
     # generate batches)
     mmap_mode = None
-    dataset = np.load("road_segm_dataset.npz", mmap_mode=mmap_mode)
-    data_train = dataset["data_train"]
-    target_train = dataset["target_train"]
-    data_valid = dataset["data_valid"]
-    target_valid = dataset["target_valid"]
-    data_test = dataset["data_test"]
-    target_test = dataset["target_test"]
+    data_train = np.load("data_train.npy", mmap_mode=mmap_mode)
+    target_train = np.load("target_train.npy", mmap_mode=mmap_mode)
+    data_valid = np.load("data_valid.npy", mmap_mode=mmap_mode)
+    target_valid = np.load("target_valid.npy", mmap_mode=mmap_mode)
+    data_test = np.load("data_test.npy", mmap_mode=mmap_mode)
+    target_test = np.load("target_test.npy", mmap_mode=mmap_mode)
 
 
     # we are using pad='same' for simplicity (otherwise we would have to crop our ground truth).
@@ -117,22 +116,19 @@ def main():
     updates = lasagne.updates.adam(loss, params, learning_rate=learning_rate)
 
     # create a convenience function to get the segmentation
-    seg_output = lasagne.layers.get_output(net["output_segmentation"], x_sym)
+    seg_output = lasagne.layers.get_output(net["output_segmentation"], x_sym, deterministic=True)
     seg_output = seg_output.argmax(1)
 
     train_fn = theano.function([x_sym, seg_sym, w_sym], [loss, acc_train], updates=updates)
     val_fn = theano.function([x_sym, seg_sym, w_sym], [loss_val, acc])
     get_segmentation = theano.function([x_sym], seg_output)
+    # we need this for calculating the AUC score
+    get_class_probas = theano.function([x_sym], prediction_test)
 
     # some data augmentation. If you want better results you should invest more effort here. I left rotations and
     # deformations out for the sake of speed and simplicity
     train_generator = random_crop_generator(batch_generator(data_train, target_train, BATCH_SIZE, shuffle=True), PATCH_SIZE)
     train_generator = threaded_generator(train_generator, num_cached=10)
-
-    # there is no need for data augmentation on the validation. However we need patches of the same size which is why
-    # we are using the random crop generator here again
-    validation_generator = center_crop_generator(batch_generator(data_valid, target_valid, BATCH_SIZE, shuffle=False), PATCH_SIZE)
-    validation_generator = threaded_generator(validation_generator, num_cached=10)
 
     # do the actual training
     for epoch in range(N_EPOCHS):
@@ -141,6 +137,7 @@ def main():
         n_batches = 0
         accuracies_train = []
         for data, target in train_generator:
+            print n_batches
             # the output of the net has shape (BATCH_SIZE, N_CLASSES). We therefore need to flatten the segmentation so
             # that we can match it with the prediction via the crossentropy loss function
             target_flat = target.ravel()
@@ -154,16 +151,19 @@ def main():
 
         losses_val = []
         accuracies_val = []
-        n_batches = 0
+        auc_val = []
+        # there is no need for data augmentation on the validation. However we need patches of the same size which is why
+        # we are using center crop generator
+        # since the validation generator does not loop around we need to reinstantiate it for every epoch
+        validation_generator = center_crop_generator(batch_generator(data_valid, target_valid, BATCH_SIZE, shuffle=False), PATCH_SIZE)
+        validation_generator = threaded_generator(validation_generator, num_cached=10)
         for data, target in validation_generator:
             target_flat = target.ravel()
             loss, acc = val_fn(data.astype(np.float32), target_flat, class_weights[target_flat])
             losses_val.append(loss)
             accuracies_val.append(acc)
-            n_batches += 1
-            if n_batches > N_BATCHES_PER_EPOCH_valid:
-                break
-        print "val accuracy: ", np.mean(accuracies_val), " val loss: ", np.mean(losses_val)
+            auc_val.append(roc_auc_score(target_flat, get_class_probas(data)[:, 1]))
+        print "val accuracy: ", np.mean(accuracies_val), " val loss: ", np.mean(losses_val), " val AUC score: ", np.mean(auc_val)
         learning_rate *= 0.2
         # save trained weights after each epoch
         with open("UNet_params_ep%03.0f.pkl"%epoch, 'w') as f:

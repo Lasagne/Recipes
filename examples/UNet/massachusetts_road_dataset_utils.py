@@ -100,10 +100,12 @@ def prepare_dataset():
         data_valid, target_valid = load_data("data/validation")
         data_test, target_test = load_data("data/test")
         # loading np arrays is much faster than loading the images one by one every time
-        np.savez_compressed("road_segm_dataset.npz",
-                            data_train=data_train, target_train=target_train,
-                            data_valid=data_valid, target_valid=target_valid,
-                            data_test=data_test, target_test=target_test)
+        np.save("data_train.npy", data_train)
+        np.save("target_train.npy", target_train)
+        np.save("data_valid.npy", data_valid)
+        np.save("target_valid.npy", target_valid)
+        np.save("data_test.npy", data_test)
+        np.save("target_test.npy", target_test)
     except:
         print "something went wrong, maybe the download?"
 

@@ -1,7 +1,18 @@
 __author__ = 'Fabian Isensee'
 import numpy as np
+import lasagne
 
 def batch_generator(data, target, BATCH_SIZE, shuffle=False):
+    if shuffle:
+        while True:
+            ids = np.random.choice(len(data), BATCH_SIZE)
+            yield data[ids], target[ids]
+    else:
+        for idx in range(0, len(data), BATCH_SIZE):
+            ids = slice(idx, idx + BATCH_SIZE)
+            yield data[ids], target[ids]
+
+def batch_generator_old(data, target, BATCH_SIZE, shuffle=False):
     '''
     just a simple batch iterator, no cropping, no rotation, no anything
     '''
@@ -21,17 +32,17 @@ def batch_generator(data, target, BATCH_SIZE, shuffle=False):
         if ctr >= data.shape[0]:
             ctr -= data.shape[0]
 
-
 def center_crop_generator(generator, output_size):
     '''
     yields center crop of size output_size (may be 1d or 2d) from data and seg
     '''
-    if type(output_size) not in (tuple, list):
+    '''if type(output_size) not in (tuple, list):
         center_crop = [output_size, output_size]
     elif len(output_size) == 2:
         center_crop = list(output_size)
     else:
-        raise ValueError("invalid output_size")
+        raise ValueError("invalid output_size")'''
+    center_crop = lasagne.utils.as_tuple(output_size, 2, int)
     for data, seg in generator:
         center = np.array(data.shape[2:])/2
         yield data[:, :, int(center[0]-center_crop[0]/2.):int(center[0]+center_crop[0]/2.), int(center[1]-center_crop[1]/2.):int(center[1]+center_crop[1]/2.)], seg[:, :, int(center[0]-center_crop[0]/2.):int(center[0]+center_crop[0]/2.), int(center[1]-center_crop[1]/2.):int(center[1]+center_crop[1]/2.)]
