@@ -1,7 +1,7 @@
+from __future__ import print_function
 from utils import load_data
 from ladder_nets import *
 import time
-import theano.misc.pkl_utils
 import lasagne
 import cPickle
 import numpy as np
@@ -11,44 +11,59 @@ LR_DECREASE = 1.
 BATCH_SIZE = 100
 INPUT_SHAPE = [1, 28, 28]
 NUM_EPOCHS = 15
-COMBINATOR_TYPE = 'milaUDEM'
-LAMBDAS = [1, 1, 1]
+COMBINATOR_TYPE = 'milaUDEM' # or 'curiousAI'
 DROPOUT = 0.3
 EXTRA_COST = False # True
-ALPHAS = None, # [0.1]*3
-BETAS = None, # [0.1]*3
+ALPHAS = None # [0.1]*3
+BETAS = None # [0.1]*3
 NUM_LABELED = None
 PSEUDO_LABELS = None
 CONV = True # False
 POOL = True # False
 
-print "Loading data..."
+print ("Loading data...")
 dataset = load_data()
 
-# build model
-if CONV:
-    input_shape = INPUT_SHAPE
-    if POOL:
-        num_encoder = [[40, 8, 0, 1, 2, 2], [10, 8, 0, 1, 2, 2]]
-        num_decoder = [[40, 8, 0, 1, 2, 2], [1, 8, 0, 1, 2, 2]]
+def get_encoder_settings(convolution, pooling):
+    if convolution and pooling:
+        settings = [('conv', (40, 8, 1, 0)), ('pool', (0, 2, 2, 0)),
+                    ('conv', (10, 8, 1, 0)), ('pool', (0, 2, 2, 0))]
+    elif convolution:
+        settings = [('conv', (40, 15, 1, 0)), ('conv', (10, 14, 1, 0))]
     else:
-        num_encoder = [[40, 15, 0, 1], [10, 14, 0, 1]]
-        num_decoder = [[40, 14, 0, 1], [1, 15, 0, 1]]
-else:
-    input_shape = np.prod(INPUT_SHAPE)
-    num_encoder = [500, 10]
-    num_decoder = [500, input_shape]
+        settings = [('dense', 500), ('dense', 10)]
 
-print "Building model and compiling functions..."
-[train_output_l, eval_output_l], dirty_net, clean_net = build_model(
-    num_encoder, num_decoder, DROPOUT, DROPOUT, input_shape=input_shape,
-    combinator_type=COMBINATOR_TYPE, convolution=CONV, pooling=POOL)
+    return settings
 
-print map(lambda x: (x.name, x.output_shape), dirty_net.values())
+def get_decoder_settings(convolution, pooling):
+    if convolution and pooling:
+        settings = [('unpool', 'enc_3_pool'), ('deconv', (40, 8, 1, 0)),
+                    ('unpool', 'enc_1_pool'), ('deconv', (1, 8, 1, 0))]
+    elif convolution:
+        settings = [('deconv', (40, 14, 1, 0)), ('deconv', (1, 15, 1, 0))]
+    else:
+        settings = [('dense', 10), ('dense', 784)]
+
+    return settings
+
+# build model
+encoder_specs = get_encoder_settings(convolution=CONV, pooling=POOL)
+decoder_specs = get_decoder_settings(convolution=CONV, pooling=POOL)
+LAMBDAS = [1] * (len(decoder_specs) + 1)
+input_shape = INPUT_SHAPE if CONV else np.prod(INPUT_SHAPE)
+
+print ("Building model ...")
+train_output_l, eval_output_l, dirty_encoder, dirty_decoder, clean_encoder = \
+    build_model(encoder_specs, decoder_specs, DROPOUT, DROPOUT,
+                input_shape=input_shape, combinator_type=COMBINATOR_TYPE)
+
+print (map(lambda x: (x.name, x.output_shape), dirty_encoder.values()))
+print (map(lambda x: (x.name, x.output_shape), dirty_decoder.values()))
 
 # set up input/output variables
-X = T.fmatrix('X') if not CONV else T.ftensor4('x')
+X = T.ftensor4('x') if CONV else T.fmatrix('X')
 y = T.ivector('y')
+y_onehot = lasagne.utils.one_hot(y, 10)
 
 # training output
 output_train = lasagne.layers.get_output(train_output_l, X,
@@ -61,12 +76,14 @@ output_eval = lasagne.layers.get_output(eval_output_l, X,
 # set up (possibly amortizable) lr, cost and updates
 sh_lr = theano.shared(lasagne.utils.floatX(LEARNING_RATE))
 
-class_cost, rec_costs = build_cost(X, lasagne.utils.one_hot(y), num_decoder,
-                                   dirty_net, clean_net, output_train,
-                                   LAMBDAS, use_extra_costs=EXTRA_COST,
-                                   alphas=ALPHAS, betas=BETAS,
-                                   num_labeled=NUM_LABELED,
-                                   pseudo_labels=PSEUDO_LABELS)
+print ("Building costs and updates ...")
+class_cost, stats = build_costNstats(y_onehot, output_train, output_eval,
+                                     NUM_LABELED, PSEUDO_LABELS)
+
+rec_costs = build_rec_costs(X, clean_encoder, dirty_decoder, decoder_specs,
+                            lambdas=LAMBDAS, alphas=ALPHAS, betas=BETAS,
+                            use_extra_costs=EXTRA_COST)
+
 cost = class_cost + T.sum(rec_costs)
 net_params = lasagne.layers.get_all_params(train_output_l, trainable=True)
 updates = lasagne.updates.adam(cost, net_params, learning_rate=sh_lr)
@@ -75,9 +92,7 @@ updates = lasagne.updates.adam(cost, net_params, learning_rate=sh_lr)
 batch_index = T.iscalar('batch_index')
 batch_slice = slice(batch_index * BATCH_SIZE, (batch_index + 1) * BATCH_SIZE)
 
-pred = T.argmax(output_eval, axis=1)
-accuracy = T.mean(T.eq(pred, y[:NUM_LABELED]), dtype=theano.config.floatX)
-
+print ("Compiling functions...")
 train = theano.function([batch_index], [cost] + rec_costs,
                         updates=updates, givens={
                             X: dataset['X_train'][batch_slice].reshape(
@@ -86,7 +101,7 @@ train = theano.function([batch_index], [cost] + rec_costs,
                             y: dataset['y_train'][batch_slice],
                         })
 
-eval = theano.function([batch_index], [cost, accuracy], givens={
+eval = theano.function([batch_index], [cost] + stats, givens={
                            X: dataset['X_valid'][batch_slice].reshape(
                                (-1,) + tuple(input_shape)
                            ),
@@ -95,8 +110,8 @@ eval = theano.function([batch_index], [cost, accuracy], givens={
 
 network_dump = {'train_output_layer': train_output_l,
                 'eval_output_layer': eval_output_l,
-                'dirty_net': dirty_net,
-                'clean_net': clean_net,
+                'dirty_net': dirty_decoder,
+                'clean_net': clean_encoder,
                 'x': X,
                 'y': y,
                 'output_eval': output_eval
@@ -138,7 +153,7 @@ num_batches_valid = dataset['num_examples_valid'] // BATCH_SIZE
 
 train_costs, valid_costs, valid_accs = [], [], []
 
-print "Starting training..."
+print ("Starting training...")
 now = time.time()
 
 try:
@@ -150,17 +165,17 @@ try:
         valid_costs.append(eval_cost)
         valid_accs.append(acc)
 
-        print "Epoch %d took %.3f s" % (n + 1, time.time() - now)
+        print ("Epoch %d took %.3f s" % (n + 1, time.time() - now))
         now = time.time()
-        print "Train cost {}, val cost {}, val acc {}".format(train_costs[-1], 
-                                                              valid_costs[-1], 
-                                                              valid_accs[-1])
-        print '\n'.join(['Layer #{} rec cost: {}'.format(i, c) for i, c
-                 in enumerate(rec_costs)])
+        print ("Train cost {}, val cost {}, val acc {}".format(train_costs[-1],
+                                                              valid_costs[-1],
+                                                              valid_accs[-1]))
+        print ('\n'.join(['Layer #{} rec cost: {}'.format(i, c) for i, c
+                 in enumerate(rec_costs)]))
 
         if (n+1) % 10 == 0:
             new_lr = sh_lr.get_value() * LR_DECREASE
-            print "New LR:", new_lr
+            print ("New LR:", new_lr)
             sh_lr.set_value(lasagne.utils.floatX(new_lr))
 except KeyboardInterrupt:
     pass
@@ -170,9 +185,9 @@ except KeyboardInterrupt:
 #                   zip(train_cost, valid_cost))
 
 # uncomment if to save the params only
-# save_dump('final_epoch_{}_ladder_net_mnist'.format(n),
+# save_dump('final_epoch_{}_ladder_net_mnist.pkl'.format(n),
 #           lasagne.layers.get_all_param_values(output_layer))
 
 # uncomment if to save the whole network
-# theano.misc.pkl_utils.dump(network_dump,
-#                            'final_epoch_{}_ladder_net_mnist.pkl'.format(n))
+# save_dump('final_epoch_{}_ladder_net_mnist.pkl'.format(n),
+#           network_dump)
