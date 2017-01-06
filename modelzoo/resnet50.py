@@ -59,7 +59,7 @@ def build_simple_block(incoming_layer, names,
     net = []
     net.append((
             names[0],
-            ConvLayer(incoming_layer, num_filters, filter_size, pad, stride,
+            ConvLayer(incoming_layer, num_filters, filter_size, stride, pad,
                       flip_filters=False, nonlinearity=None) if use_bias
             else ConvLayer(incoming_layer, num_filters, filter_size, stride, pad, b=None,
                            flip_filters=False, nonlinearity=None)
@@ -154,7 +154,7 @@ def build_model():
     net['input'] = InputLayer((None, 3, 224, 224))
     sub_net, parent_layer_name = build_simple_block(
         net['input'], ['conv1', 'bn_conv1', 'conv1_relu'],
-        64, 7, 3, 2, use_bias=True)
+        64, 7, 2, 3, use_bias=True)
     net.update(sub_net)
     net['pool1'] = PoolLayer(net[parent_layer_name], pool_size=3, stride=2, pad=0, mode='max', ignore_border=False)
     block_size = list('abc')
