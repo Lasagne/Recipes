@@ -1,9 +1,9 @@
 # C3D, AlexNet type model with 3D convolutions (for video processing).
 # From "Learning Spatiotemporal Features with 3D Convolutional Networks"
 #
-# Pretrained weights from https://data.vision.ee.ethz.ch/gyglim/C3D/c3d_model.pkl
+# Pretrained weights from https://s3.amazonaws.com/lasagne/recipes/pretrained/c3d/c3d_model.pkl
 # and the snipplet mean from
-# https://data.vision.ee.ethz.ch/gyglim/C3D/snipplet_mean.npy
+# https://s3.amazonaws.com/lasagne/recipes/pretrained/c3d/snipplet_mean.npy
 #
 # License: Not specified
 # Author: Michael Gygli, https://github.com/gyglim
