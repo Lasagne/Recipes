@@ -23,10 +23,13 @@ def plot_some_results(pred_fn, test_generator, n_images=10):
             plt.figure(figsize=(12, 6))
             plt.subplot(1, 3, 1)
             plt.imshow(d.transpose(1,2,0))
+            plt.title("input patch")
             plt.subplot(1, 3, 2)
             plt.imshow(s[0])
+            plt.title("ground truth")
             plt.subplot(1, 3, 3)
             plt.imshow(r)
+            plt.title("segmentation")
             plt.savefig("road_segmentation_result_%03.0f.png"%fig_ctr)
             plt.close()
             fig_ctr += 1
@@ -40,18 +43,15 @@ def main():
         prepare_dataset()
 
     # set some hyper parameters. You should not have to touch anything if you have 4GB or more VRAM
-    BATCH_SIZE = 6
+    BATCH_SIZE = 12 # this works if you have ~ 8GB VRAM. Use smaller BATCH_SIZE for other GPUs
     N_EPOCHS = 30
     N_BATCHES_PER_EPOCH = 100
     PATCH_SIZE = 512
 
     # load the prepared data. They have been converted to np arrays because they are much faster to load than single image files.
-    # you will need some ram in order to have everything in memory.
-    # If you are having RAM issues, change mmap_mode to 'r'. This will not load the entire array into memory but rather
-    # read from disk the bits that we currently need
-    # (if you have, copy your repository including the data to an SSD, otherwise it will take a long time to
-    # generate batches)
-    mmap_mode = None
+    # This code will not load the entire array into memory but rather read from disk the bits that we currently need
+    # set mmap_mode to None if you want to load the data into RAM
+    mmap_mode = 'r'
     data_train = np.load("data_train.npy", mmap_mode=mmap_mode)
     target_train = np.load("target_train.npy", mmap_mode=mmap_mode)
     data_valid = np.load("data_valid.npy", mmap_mode=mmap_mode)
@@ -62,7 +62,7 @@ def main():
     # we are using pad='same' for simplicity (otherwise we would have to crop our ground truth). Keep in mind that this
     # may not be ideal
     net = build_UNet(n_input_channels=3, BATCH_SIZE=None, num_output_classes=2, pad='same',
-                     nonlinearity=lasagne.nonlinearities.elu, input_dim=(PATCH_SIZE, PATCH_SIZE),
+                     nonlinearity=lasagne.nonlinearities.rectify, input_dim=(PATCH_SIZE, PATCH_SIZE),
                      base_n_filters=16, do_dropout=False)
     output_layer_for_loss = net["output_flattened"]
 
