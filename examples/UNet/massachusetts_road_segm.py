@@ -43,8 +43,8 @@ def main():
         prepare_dataset()
 
     # set some hyper parameters. You should not have to touch anything if you have 4GB or more VRAM
-    BATCH_SIZE = 12 # this works if you have ~ 8GB VRAM. Use smaller BATCH_SIZE for other GPUs
-    N_EPOCHS = 30
+    BATCH_SIZE = 8 # this works if you have ~ 8GB VRAM. Use smaller BATCH_SIZE for other GPUs
+    N_EPOCHS = 50
     N_BATCHES_PER_EPOCH = 100
     PATCH_SIZE = 512
 
@@ -77,15 +77,16 @@ def main():
     class_weights = class_weights.astype(np.float32)
 
     # if you wish to load pretrained weights you can uncomment this code
-    # val accuracy:  0.963513  val loss:  0.114994  val AUC score:  0.978996643458
-    '''if not os.path.isfile('UNet_params_ep029.pkl'):
+    # val accuracy:  0.966384  val loss:  0.0947428  val AUC score:  0.980004909707
+    # you can also change the lower part of this code to load your own pretrained params
+    '''if not os.path.isfile('UNet_params_pretrained.pkl'):
         import urllib
         import zipfile
         urllib.urlretrieve("https://s3.amazonaws.com/lasagne/recipes/pretrained/UNet_mass_road_segm_params.zip", 'pretrained_weights.zip')
         zip_ref = zipfile.ZipFile('pretrained_weights.zip', 'r')
         zip_ref.extractall("./")
         zip_ref.close()
-    with open("UNet_params_ep029.pkl", 'r') as f:
+    with open("UNet_params_pretrained.pkl", 'r') as f:
         params = cPickle.load(f)
         lasagne.layers.set_all_param_values(output_layer_for_loss, params)'''
 
@@ -97,7 +98,7 @@ def main():
     l2_loss = lasagne.regularization.regularize_network_params(output_layer_for_loss, lasagne.regularization.l2) * 1e-4
 
     # the distinction between prediction_train and test is important only if we enable dropout
-    prediction_train = lasagne.layers.get_output(output_layer_for_loss, x_sym, deterministic=False)
+    prediction_train = lasagne.layers.get_output(output_layer_for_loss, x_sym, deterministic=False, batch_norm_update_averages=False, batch_norm_use_averages=False)
     # we could use a binary loss but I stuck with categorical crossentropy so that less code has to be changed if your
     # application has more than two classes
     loss = lasagne.objectives.categorical_crossentropy(prediction_train, seg_sym)
@@ -106,7 +107,7 @@ def main():
     loss += l2_loss
     acc_train = T.mean(T.eq(T.argmax(prediction_train, axis=1), seg_sym), dtype=theano.config.floatX)
 
-    prediction_test = lasagne.layers.get_output(output_layer_for_loss, x_sym, deterministic=True)
+    prediction_test = lasagne.layers.get_output(output_layer_for_loss, x_sym, deterministic=True, batch_norm_update_averages=False, batch_norm_use_averages=False)
     loss_val = lasagne.objectives.categorical_crossentropy(prediction_test, seg_sym)
 
     # we multiply our loss by a weight map. In this example the weight map simply increases the loss for road pixels and
@@ -138,7 +139,7 @@ def main():
     train_generator = threaded_generator(train_generator, num_cached=10)
 
     # do the actual training
-    for epoch in range(N_EPOCHS):
+    for epoch in np.arange(0, N_EPOCHS):
         print epoch
         losses_train = []
         n_batches = 0
