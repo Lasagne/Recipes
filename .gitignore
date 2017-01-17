@@ -5,6 +5,9 @@ __pycache__/
 # C extensions
 *.so
 
+# datasets
+*.zip
+
 # Distribution / packaging
 .Python
 env/
@@ -22,6 +25,7 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+.idea
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -55,3 +59,13 @@ docs/_build/
 
 # PyBuilder
 target/
+
+examples/UNet/data*
+examples/UNet/*.sh
+examples/UNet/*.npz
+examples/UNet/*.npy
+examples/UNet/*.pkl
+examples/UNet/*.png
+examples/UNet/readme.txt
+.gitignore~
+
