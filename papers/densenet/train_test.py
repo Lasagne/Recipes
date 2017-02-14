@@ -142,7 +142,8 @@ def train_test(depth, growth_rate, dropout, augment, validate, epochs,
     test_loss = lasagne.objectives.categorical_crossentropy(test_prediction,
                                                             target_var).mean()
     test_err = 1 - lasagne.objectives.categorical_accuracy(test_prediction,
-                                                           target_var).mean()
+                                                           target_var).mean(
+                                                  dtype=theano.config.floatX)
     test_fn = theano.function([input_var, target_var], [test_loss, test_err])
 
     # Finally, launch the training loop.
