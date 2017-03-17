@@ -124,6 +124,7 @@ def main():
     updates = lasagne.updates.adam(loss, params, learning_rate=learning_rate)
 
     # create a convenience function to get the segmentation
+
     seg_output = lasagne.layers.get_output(net["output_segmentation"], x_sym, deterministic=True, batch_norm_update_averages=False, batch_norm_use_averages=False)
     seg_output = seg_output.argmax(1)
 
