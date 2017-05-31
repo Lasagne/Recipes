@@ -116,17 +116,17 @@ def build_residual_block(incoming_layer, ratio_n_filter=1.0, ratio_size=1.0, has
 
     # right branch
     net_tmp, last_layer_name = build_simple_block(
-        incoming_layer, map(lambda s: s % (ix, 2, 'a'), simple_block_name_pattern),
+        incoming_layer, list(map(lambda s: s % (ix, 2, 'a'), simple_block_name_pattern)),
         int(lasagne.layers.get_output_shape(incoming_layer)[1]*ratio_n_filter), 1, int(1.0/ratio_size), 0)
     net.update(net_tmp)
 
     net_tmp, last_layer_name = build_simple_block(
-        net[last_layer_name], map(lambda s: s % (ix, 2, 'b'), simple_block_name_pattern),
+        net[last_layer_name], list(map(lambda s: s % (ix, 2, 'b'), simple_block_name_pattern)),
         lasagne.layers.get_output_shape(net[last_layer_name])[1], 3, 1, 1)
     net.update(net_tmp)
 
     net_tmp, last_layer_name = build_simple_block(
-        net[last_layer_name], map(lambda s: s % (ix, 2, 'c'), simple_block_name_pattern),
+        net[last_layer_name], list(map(lambda s: s % (ix, 2, 'c'), simple_block_name_pattern)),
         lasagne.layers.get_output_shape(net[last_layer_name])[1]*upscale_factor, 1, 1, 0,
         nonlin=None)
     net.update(net_tmp)
@@ -137,7 +137,7 @@ def build_residual_block(incoming_layer, ratio_n_filter=1.0, ratio_size=1.0, has
     # left branch
     if has_left_branch:
         net_tmp, last_layer_name = build_simple_block(
-            incoming_layer, map(lambda s: s % (ix, 1, ''), simple_block_name_pattern),
+            incoming_layer, list(map(lambda s: s % (ix, 1, ''), simple_block_name_pattern)),
             int(lasagne.layers.get_output_shape(incoming_layer)[1]*4*ratio_n_filter), 1, int(1.0/ratio_size), 0,
             nonlin=None)
         net.update(net_tmp)
