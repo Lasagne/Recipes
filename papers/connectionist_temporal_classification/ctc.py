@@ -33,7 +33,7 @@ def ctc_forward(log_odds, seq_sizes,
              seq_sizes_, blanked_labels_, label_sizes_, not_repeated_):
         y_t = log_odds_[t]
         k = T.max(a_tm1, axis=-1, keepdims=True)
-        k = T.switch(T.isinf(k), 0, k)
+        k = T.switch(T.all(T.isinf(a_tm1), axis=-1, keepdims=True), 0, k)
         a_tm1 = T.switch(T.isinf(a_tm1), 0, T.exp(a_tm1 - k))  # exit log space
         a_t = a_tm1
         a_t = T.inc_subtensor(a_t[:, 1:], a_tm1[:, :-1])
@@ -58,8 +58,7 @@ def ctc_forward(log_odds, seq_sizes,
         outputs_info=[alpha_init],
         non_sequences=[log_odds, seq_sizes, blanked_labels, label_sizes,
                        not_repeated],
-        name="ctc_forward",
-        profile=True)
+        name="ctc_forward")
 
     return alphas
 
@@ -73,7 +72,7 @@ def ctc_backward(log_odds, seq_sizes,
              seq_sizes_, blanked_labels_, label_sizes_, not_repeated_):
         y_t = log_odds_[t]
         k = T.max(b_tp1, axis=-1, keepdims=True)
-        k = T.switch(T.isinf(k), 0, k)
+        k = T.switch(T.all(T.isinf(b_tp1), axis=-1, keepdims=True), 0, k)
         b_tp1 = T.switch(T.isinf(b_tp1), 0, T.exp(b_tp1 - k))  # exit log space
 
         # increase b_{T+1}(|l'|) from 0 to 1 to initialize recursion
@@ -99,8 +98,7 @@ def ctc_backward(log_odds, seq_sizes,
         non_sequences=[log_odds, seq_sizes, blanked_labels, label_sizes,
                        not_repeated],
         go_backwards=True,
-        name="ctc_backward",
-        profile=True)
+        name="ctc_backward")
     betas = betas[::-1, :, :]
 
     return betas
@@ -155,8 +153,7 @@ def ctc_grad_graph(inputs, output_gradients):
         sequences=[T.arange(2 * label_size + 1)],
         outputs_info=[-np.inf * T.ones((seq_size, batch_size, voca_size))],
         non_sequences=[blanked_labels, ab],
-        name="fwbw_sum",
-        profile=True)[0][-1]
+        name="fwbw_sum")[0][-1]
 
     # d(loss) / dy
     dloss_dy = T.switch(
