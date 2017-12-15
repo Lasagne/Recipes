@@ -11,6 +11,18 @@ import numpy as np
 import theano
 import theano.tensor as T
 from theano.tensor import discrete_dtypes, continuous_dtypes
+from theano.printing import Print
+
+
+def isneginf(x, neginf=-1e27):
+    return x < neginf
+
+
+def logaddexp(x, y, inf=1e9):
+    x, y = T.minimum(x, y), T.maximum(x, y)
+    diff = T.minimum(y - x, T.log(inf) / T.log(10))
+    res = x + T.log(1 + T.exp(diff))
+    return T.switch((y - x > T.log(inf) / T.log(10)), y, res)
 
 
 # Bits of the CTC algorithm ---------------------------------------------------
@@ -33,8 +45,8 @@ def ctc_forward(log_odds, seq_sizes,
              seq_sizes_, blanked_labels_, label_sizes_, not_repeated_):
         y_t = log_odds_[t]
         k = T.max(a_tm1, axis=-1, keepdims=True)
-        k = T.switch(T.all(T.isinf(a_tm1), axis=-1, keepdims=True), 0, k)
-        a_tm1 = T.switch(T.isinf(a_tm1), 0, T.exp(a_tm1 - k))  # exit log space
+        k = T.switch(T.all(isneginf(a_tm1), axis=-1, keepdims=True), 0, k)
+        a_tm1 = T.switch(isneginf(a_tm1), 0, T.exp(a_tm1 - k))  # exit log space
         a_t = a_tm1
         a_t = T.inc_subtensor(a_t[:, 1:], a_tm1[:, :-1])
         a_t = T.inc_subtensor(a_t[:, 2:], a_tm1[:, :-2] * not_repeated_)
@@ -45,11 +57,11 @@ def ctc_forward(log_odds, seq_sizes,
                    2 * label_sizes_[:, None] + 1)
 
         a_t = T.switch(  # back to log space
-            T.eq(a_t, 0) + mask, -np.inf,
+            T.eq(a_t, 0) + mask, -1e30,
             T.log(a_t) + k + y_t[T.arange(batch_sz)[:, None], blanked_labels_])
         return a_t
 
-    alpha_init = -np.inf * T.ones((batch_sz, label_size))
+    alpha_init = -1e30 * T.ones((batch_sz, label_size))
     alpha_init = T.set_subtensor(alpha_init[:, 0], 0)
 
     alphas, _ = theano.scan(
@@ -72,8 +84,9 @@ def ctc_backward(log_odds, seq_sizes,
              seq_sizes_, blanked_labels_, label_sizes_, not_repeated_):
         y_t = log_odds_[t]
         k = T.max(b_tp1, axis=-1, keepdims=True)
-        k = T.switch(T.all(T.isinf(b_tp1), axis=-1, keepdims=True), 0, k)
-        b_tp1 = T.switch(T.isinf(b_tp1), 0, T.exp(b_tp1 - k))  # exit log space
+        k = T.switch(T.all(isneginf(b_tp1), axis=-1, keepdims=True), 0, k)
+        b_tp1 = T.switch(isneginf(b_tp1), 0, T.exp(b_tp1 - k))  # exit log space
+        b_tp1 = b_tp1
 
         # increase b_{T+1}(|l'|) from 0 to 1 to initialize recursion
         starter_t = T.eq(t, seq_sizes_ - 1)[:, None] \
@@ -85,11 +98,11 @@ def ctc_backward(log_odds, seq_sizes,
         b_t = T.inc_subtensor(b_t[:, :-1], b_tp1[:, 1:])
         b_t = T.inc_subtensor(b_t[:, :-2], b_tp1[:, 2:] * not_repeated_)
         b_t = T.switch(  # back to log space
-            T.eq(b_t, 0), -np.inf,
+            T.eq(b_t, 0), -1e30,
             T.log(b_t) + k + y_t[T.arange(batch_sz)[:, None], blanked_labels_])
         return b_t
 
-    beta_init = - np.inf * T.ones((batch_sz, label_size))
+    beta_init = -1e30 * T.ones((batch_sz, label_size))
 
     betas, _ = theano.scan(
         fn=step,
@@ -115,16 +128,14 @@ def ctc_perform_graph(preds, seq_sizes, labels, label_sizes, blank):
     betas = ctc_backward(log_preds, seq_sizes,
                          blanked_labels, label_sizes, not_repeated)
 
-    loss = -T.switch(T.all(T.isinf(betas[0, :, :2]), axis=1),
-                     -np.inf,  # impossible sequences, eg: too short
-                     T.log(T.exp(betas[0, :, 0]) + T.exp(betas[0, :, 1])))
+    loss = - logaddexp(betas[0, :, 0], betas[0, :, 1])
 
     return log_preds, blanked_labels, not_repeated, betas, loss
 
 
 def ctc_grad_graph(inputs, output_gradients):
-    linear_out, seq_durations, labels, label_sizes, _ = inputs
-    seq_size, batch_size, voca_size = linear_out.shape
+    preds, seq_durations, labels, label_sizes, _ = inputs
+    seq_size, batch_size, voca_size = preds.shape
     label_size = labels.shape[1]
 
     # TODO: will theano optimize this redundant call when both loss and
@@ -141,23 +152,22 @@ def ctc_grad_graph(inputs, output_gradients):
     def fwbw_sum_step(k, s, labels_, ab_):
         s_view = s[:, T.arange(batch_size), labels_[:, k]]
         ab_view = ab_[:, :, k]
-        next_sum = ab_view + T.switch(T.isinf(s_view),
-                                      0, T.log(1 + T.exp(s_view - ab_view)))
-        next_sum = T.switch(T.isinf(ab_view), s_view, next_sum)
+        next_sum = logaddexp(s_view, ab_view)
         s = T.set_subtensor(s_view, next_sum)
         return s
 
-    ab = T.switch(T.isinf(alphas) + T.isinf(betas), -np.inf, alphas + betas)
+    ab = alphas + betas
     fwbw_sum = theano.scan(
         fn=fwbw_sum_step,
         sequences=[T.arange(2 * label_size + 1)],
-        outputs_info=[-np.inf * T.ones((seq_size, batch_size, voca_size))],
+        outputs_info=[-1e30 * T.ones((seq_size, batch_size, voca_size))],
         non_sequences=[blanked_labels, ab],
+        strict=True,
         name="fwbw_sum")[0][-1]
 
     # d(loss) / dy
     dloss_dy = T.switch(
-        T.isinf(loss)[None, :, None],
+        isneginf(loss)[None, :, None],
         0,
         - T.exp(fwbw_sum - log_pl[None, :, None] - 2 * log_preds))
 
@@ -169,18 +179,18 @@ def ctc_grad_graph(inputs, output_gradients):
 
 
 def make_ctc_op():
-    linear_out_var = T.tensor3()
+    preds_var = T.tensor3()
     seq_durations_var = T.ivector()
     labels_var = T.imatrix()
     label_sizes_var = T.ivector()
     blank_var = T.iscalar()
 
     _, _, _, _, loss = ctc_perform_graph(
-        linear_out_var, seq_durations_var, labels_var,
+        preds_var, seq_durations_var, labels_var,
         label_sizes_var, blank_var)
 
     return theano.OpFromGraph(
-        inputs=[linear_out_var, seq_durations_var,
+        inputs=[preds_var, seq_durations_var,
                 labels_var, label_sizes_var, blank_var],
         outputs=[loss],
         grad_overrides=ctc_grad_graph,
