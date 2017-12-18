@@ -117,39 +117,24 @@ class TestCTC(unittest.TestCase):
         blank = 0
 
         expected_grad = np.asarray([
-            [[0.2,            -0.8,          0.2,            0.2, 0.2],
-             [0.01165623125, 0.03168492019, 0.08612854034, -0.7658783197,
-              0.636408627],
-             [-0.02115798369, 0.03168492019, -0.8810571432, 0.2341216654,
-              0.636408627]],
-            [[0, 0, 0, 0, 0],
-             [-0.9883437753, 0.03168492019, 0.08612854034, 0.2341216654,
-              0.636408627],
-             [-0.02115798369, 0.03168492019, -0.1891518533, -0.4577836394,
-              0.636408627]],
-            [[0, 0, 0, 0, 0],
-             [0.01165623125, 0.03168492019, 0.08612854034, -0.7658783197,
-              0.636408627],
-             [-0.02115798369, 0.03168492019, 0.08612854034, -0.7330639958,
-              0.636408627]]
+            [[0.2,            -0.8,            0.2,            0.2,           0.2],
+             [ 0.01165623125,  0.03168492019,  0.08612854034, -0.7658783197,  0.636408627],
+             [-0.02115798369,  0.03168492019, -0.8810571432,   0.2341216654,  0.636408627]],
+            [[0,               0,              0,              0,             0],
+             [-0.9883437753,   0.03168492019,  0.08612854034,  0.2341216654,  0.636408627],
+             [-0.02115798369,  0.03168492019, -0.1891518533,  -0.4577836394,  0.636408627]],
+            [[0,               0,              0,              0,             0],
+             [0.01165623125,   0.03168492019,  0.08612854034, -0.7658783197,  0.636408627],
+             [-0.02115798369,  0.03168492019,  0.08612854034, -0.7330639958,  0.636408627]]
         ], dtype=np.float32)
 
-        seq_size, batch_size, voca_size = linear_out.shape
-
-        linear_out_t = T.as_tensor_variable(linear_out)
-        seq_sizes_t = T.as_tensor_variable(seq_sizes)
-        labels_t = T.as_tensor_variable(labels)
-        label_sizes_t = T.as_tensor_variable(label_sizes)
-        blank_t = T.as_tensor_variable(blank)
-
-        preds = T.nnet.softmax(
-            linear_out_t.reshape((-1, voca_size))
-        ).reshape((seq_size, batch_size, voca_size))
-        losses = ctc_loss(preds, seq_sizes_t, labels_t, label_sizes_t, blank_t)
+        linear_out_var = T.as_tensor_variable(linear_out)
+        losses = ctc_loss(
+            linear_out_var, seq_sizes, labels, label_sizes, blank)
 
         assert np.allclose(losses.eval(), expected_losses, atol=1)
 
-        grad = theano.grad(losses.sum(), wrt=linear_out_t)
+        grad = theano.grad(losses.sum(), wrt=linear_out_var)
 
         assert np.allclose(grad.eval(), expected_grad, rtol=.001, atol=1)
 
