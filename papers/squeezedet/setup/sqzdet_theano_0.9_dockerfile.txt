@@ -1,0 +1,37 @@
+#Ubuntu CUDA Py2 docker file for sqzdet_theano under Theano 0.9
+# nvidia-docker build -t sqzdet_theano_0.9 . -- file sqzdet_theano_0.9.txt
+
+FROM nvidia/cuda:8.0-cudnn5-devel-ubuntu16.04
+
+RUN apt-get update && apt-get install -y \
+  apt-utils \
+  git \
+  wget
+
+RUN wget --no-check-certificate https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda2.sh
+
+RUN chmod +x miniconda2.sh && bash ./miniconda2.sh -b -p /opt/miniconda2
+
+ENV PATH /opt/miniconda2/bin:$PATH
+
+RUN conda update conda
+
+# as of 20171226: matplotlib=2.1.1 numpy=1.13.3 pillow=4.3.0
+RUN conda install \
+    matplotlib \
+    numpy \
+    pillow \
+    mkl-service
+
+#NB: we require Lasagne>=0.2, still "bleeding edge" (0.2.dev1 as of 20171225)
+RUN pip install \
+    numpy \
+    easydict \
+    future \
+    Theano==0.9 \
+    --upgrade https://github.com/Lasagne/Lasagne/archive/master.zip
+
+# to avoid RuntimeError('To use MKL 2018 with Theano...')
+ENV MKL_THREADING_LAYER GNU
+
+# nvidia-docker run --rm -it --name st_0  -v /home/ubuntu:/home/ubuntu sqzdet_theano_0.9
