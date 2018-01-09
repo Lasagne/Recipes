@@ -11,14 +11,14 @@ import numpy as np
 import theano
 import theano.tensor as T
 from theano.tensor import discrete_dtypes, continuous_dtypes
-# from theano.printing import Print
+from theano.printing import Print
 
 
-def isneginf(x, neginf=-1e27):
+def isneginf(x, neginf=-1e9):
     return x < neginf
 
 
-def logaddexp(x, y, magnitude=9):
+def logaddexp(x, y, magnitude=20):
     x, y = T.minimum(x, y), T.maximum(x, y)
     diff = T.minimum(y - x, magnitude)
     res = x + T.log(1 + T.exp(diff))
@@ -64,7 +64,7 @@ def ctc_forward(log_odds, seq_sizes,
         y_t = log_odds_[t]
         k = T.max(a_tm1, axis=-1, keepdims=True)
         k = T.switch(T.all(isneginf(a_tm1), axis=-1, keepdims=True), 0, k)
-        a_tm1 = T.switch(isneginf(a_tm1), 0, T.exp(a_tm1 - k))  # exit log space
+        a_tm1 = T.switch(a_tm1 - k < - 88, 0, T.exp(a_tm1 - k))
         a_t = a_tm1
         a_t = T.inc_subtensor(a_t[:, 1:], a_tm1[:, :-1])
         a_t = T.inc_subtensor(a_t[:, 2:], a_tm1[:, :-2] * not_repeated_)
@@ -75,11 +75,11 @@ def ctc_forward(log_odds, seq_sizes,
                    2 * label_sizes_[:, None] + 1)
 
         a_t = T.switch(  # back to log space
-            T.eq(a_t, 0) + mask, -1e30,
+            T.eq(a_t, 0) + mask, -2e9,
             T.log(a_t) + k + y_t[T.arange(batch_sz)[:, None], blanked_labels_])
         return a_t
 
-    alpha_init = -1e30 * T.ones((batch_sz, label_size))
+    alpha_init = -2e9 * T.ones((batch_sz, label_size))
     alpha_init = T.set_subtensor(alpha_init[:, 0], 0)
 
     alphas, _ = theano.scan(
@@ -101,26 +101,32 @@ def ctc_backward(log_odds, seq_sizes,
     def step(t, b_tp1, log_odds_,
              seq_sizes_, blanked_labels_, label_sizes_, not_repeated_):
         y_t = log_odds_[t]
-        k = T.max(b_tp1, axis=-1, keepdims=True)
-        k = T.switch(T.all(isneginf(b_tp1), axis=-1, keepdims=True), 0, k)
-        b_tp1 = T.switch(isneginf(b_tp1), 0, T.exp(b_tp1 - k))  # exit log space
-        b_tp1 = b_tp1
 
         # increase b_{T+1}(|l'|) from 0 to 1 to initialize recursion
         starter_t = T.eq(t, seq_sizes_ - 1)[:, None] \
             * T.eq((2 * label_sizes_)[:, None],
-                   T.arange(label_size)[None, :]) * 1
-        b_tp1 += starter_t  # initialize recursion
+                   T.arange(label_size)[None, :])
+        b_tp1_2lp1 = b_tp1[T.arange(batch_sz), 2 * label_sizes_]
+        b_tp1 = T.set_subtensor(
+            b_tp1_2lp1,
+            T.switch(T.eq(t, seq_sizes_ - 1), 0, b_tp1_2lp1))
+        b_tp1 = T.switch(starter_t, 0, b_tp1)  # initialize recursion
 
         b_t = b_tp1
-        b_t = T.inc_subtensor(b_t[:, :-1], b_tp1[:, 1:])
-        b_t = T.inc_subtensor(b_t[:, :-2], b_tp1[:, 2:] * not_repeated_)
-        b_t = T.switch(  # back to log space
-            T.eq(b_t, 0), -1e30,
-            T.log(b_t) + k + y_t[T.arange(batch_sz)[:, None], blanked_labels_])
+        b_t = T.set_subtensor(
+            b_t[:, :-1],
+            logaddexp(b_t[:, :-1], b_tp1[:, 1:]))
+        b_t = T.set_subtensor(
+            b_t[:, :-2],
+            logaddexp(b_t[:, :-2], T.switch(not_repeated_, b_tp1[:, 2:], -2e9)))
+        b_t += y_t[T.arange(batch_sz)[:, None], blanked_labels_]
+        # idx = Print("idx")(T.maximum(0, 2 * label_sizes_ + 1 + 2 * t - 2 * batch_dur))
+        # m = Print("m")(T.max(b_t).sum())
+        # b_t = b_t + (m - m)
+        b_t = T.switch(isneginf(b_t), -2e9, b_t)
         return b_t
 
-    beta_init = -1e30 * T.ones((batch_sz, label_size))
+    beta_init = -2e9 * T.ones((batch_sz, label_size))
 
     betas, _ = theano.scan(
         fn=step,
@@ -178,7 +184,7 @@ def ctc_grad_graph(inputs, output_gradients):
     fwbw_sum = theano.scan(
         fn=fwbw_sum_step,
         sequences=[T.arange(2 * label_size + 1)],
-        outputs_info=[-1e30 * T.ones((seq_size, batch_size, voca_size))],
+        outputs_info=[-2e9 * T.ones((seq_size, batch_size, voca_size))],
         non_sequences=[blanked_labels, ab],
         strict=True,
         name="fwbw_sum")[0][-1]
@@ -189,7 +195,7 @@ def ctc_grad_graph(inputs, output_gradients):
         - T.exp(log_odds + A)
 
     dloss_dy = T.switch(
-        (loss[None, :, None] > 1e10) + T.isinf(loss[None, :, None]),
+        (loss[None, :, None] > 1e9) + T.isinf(loss[None, :, None]),
         0, dloss_dy)
 
     return [dloss_dy * output_gradients[0][None, :, None],
