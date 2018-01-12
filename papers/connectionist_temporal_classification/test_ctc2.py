@@ -190,4 +190,4 @@ class TestCTC(unittest.TestCase):
             return loss
 
         unittest_tools.verify_grad(
-            f, [linear_out], rel_tol=0.1, abs_tol=1)
+            f, [linear_out], rel_tol=.1, abs_tol=.1)
