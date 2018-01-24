@@ -11,7 +11,6 @@ import numpy as np
 import theano
 import theano.tensor as T
 from theano.tensor import discrete_dtypes, continuous_dtypes
-from theano.printing import Print
 
 
 def isneginf(x, neginf=-1e9):
@@ -27,7 +26,8 @@ def logaddexp(x, y, magnitude=20):
 
 def logsumexp(x, axis, keepdims=False):
     k = T.max(x, axis=axis, keepdims=True)
-    return T.log(T.sum(T.exp(x - k), axis=axis, keepdims=keepdims))
+    res = T.log(T.sum(T.exp(x - k), axis=axis, keepdims=keepdims)) + k
+    return T.switch(isneginf(k), -2e9, res)
 
 
 def log_softmax(X, axis=-1, clip=None):
@@ -162,17 +162,13 @@ def ctc_grad_graph(inputs, output_gradients):
     seq_size, batch_size, voca_size = linout.shape
     label_size = labels.shape[1]
 
-    # TODO: will theano optimize this redundant call when both loss and
-    # gradient are requested separately?
     logits, blanked_labels, not_repeated, betas, loss = \
         ctc_perform_graph(*inputs)
 
     alphas = ctc_forward(logits, seq_durations,
                          blanked_labels, label_sizes, not_repeated)
 
-    log_pl = - loss
-
-    # sum_{s \in lab(l, k)} a_t(s) b_t(s)
+    # log(sum_{s \in lab(l, k)} a_t(s) b_t(s))
     def fwbw_sum_step(k, s, labels_, ab_):
         s_view = s[:, T.arange(batch_size), labels_[:, k]]
         ab_view = ab_[:, :, k]
@@ -189,19 +185,13 @@ def ctc_grad_graph(inputs, output_gradients):
         strict=True,
         name="fwbw_sum")[0][-1]
 
-    A = fwbw_sum - log_pl[None, :, None] - logits
-    B = logits + logsumexp(A, axis=2, keepdims=True)
-    dloss_dy = T.exp(B) - T.exp(A)
-    # A = fwbw_sum - log_pl[None, :, None] - 2 * logits
-    # dloss_dy = T.exp(2 * logits + logsumexp(A, axis=2, keepdims=True)) \
-    #            - T.exp(logits + A)
+    A = loss[None, :, None] + logits \
+        + logsumexp(fwbw_sum - logits, axis=2, keepdims=True)
+    B = loss[None, :, None] + fwbw_sum - logits
+    dloss_dy = T.exp(A) - T.exp(B)
 
-    dloss_dy = T.switch(T.all(isneginf(A), axis=2, keepdims=True),
+    dloss_dy = T.switch(T.all(isneginf(fwbw_sum), axis=2, keepdims=True),
                         0, dloss_dy)
-
-    # dloss_dy = T.switch(
-    #     (loss[None, :, None] > 1e9) + T.isinf(loss[None, :, None]),
-    #     0, dloss_dy)
 
     return [dloss_dy * output_gradients[0][None, :, None],
             theano.gradient.disconnected_type(),
@@ -255,13 +245,13 @@ def ctc_loss(linout, durations, labels, label_sizes, blank=-1):
         An _integer_ vector of size batch_size contining the actual length of
         each sequence in preds.
     labels: Theano shared variable, expression or numpy array
-        An _integer_ matrix of size batch_size x label_size containg the target
-        labels.
+        An _integer_ matrix of size batch_size x label_size containing the
+        target labels.
     label_sizes: Theano shared variable, expression or numpy array
-        An _integer_ vector of size batch_size contining the actual length of
+        An _integer_ vector of size batch_size containing the actual length of
         each sequence in labels.
     blank:
-        The blank label class, by default the last one.
+        The blank label class, by default the last index.
 
     Returns
     -------
@@ -275,7 +265,6 @@ def ctc_loss(linout, durations, labels, label_sizes, blank=-1):
        unsegmented sequence data with recurrent neural networks. In
        Proceedings of the 23rd international conference on Machine learning
        (pp. 369-376). ACM. ftp://ftp.idsia.ch/pub/juergen/icml2006.pdf
-
     """
     linout = T.as_tensor_variable(linout)
     durations = T.as_tensor_variable(durations)

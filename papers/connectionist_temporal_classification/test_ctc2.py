@@ -5,14 +5,8 @@ import theano.tensor as T
 from theano.tests import unittest_tools
 
 from papers.connectionist_temporal_classification.ctc import \
-    ctc_loss, ctc_forward, ctc_backward, insert_alternating_blanks, isneginf
-
-
-def log_softmax(X):
-    k = T.max(X, axis=-1, keepdims=True)
-    norm_X = X - k
-    log_sum_exp_X = T.log(T.sum(T.exp(norm_X), axis=-1, keepdims=True))
-    return norm_X - log_sum_exp_X
+    ctc_loss, ctc_forward, ctc_backward, insert_alternating_blanks, \
+    isneginf, log_softmax
 
 
 class TestCTC(unittest.TestCase):
@@ -189,5 +183,4 @@ class TestCTC(unittest.TestCase):
             loss = T.switch(isneginf(-loss), 0, loss)
             return loss
 
-        unittest_tools.verify_grad(
-            f, [linear_out], rel_tol=.1, abs_tol=.1)
+        unittest_tools.verify_grad(f, [linear_out], abs_tol=0.05, rel_tol=0.05)
