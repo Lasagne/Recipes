@@ -21,7 +21,7 @@ def logaddexp(x, y, magnitude=20):
     x, y = T.minimum(x, y), T.maximum(x, y)
     diff = T.minimum(y - x, magnitude)
     res = x + T.log(1 + T.exp(diff))
-    return T.switch((y - x > magnitude), y, res)
+    return T.switch((y - x) > magnitude, y, res)
 
 
 def logsumexp(x, axis, keepdims=False):
@@ -51,13 +51,13 @@ def insert_alternating_blanks(labels, blank_label):
     return blanked_labels
 
 
-def ctc_forward(log_odds, seq_sizes,
+def ctc_forward(log_odds, durations,
                 blanked_labels, label_sizes, not_repeated):
     seqsize, batch_sz, _ = log_odds.shape
     label_size = blanked_labels.shape[1]
 
     def step(t, a_tm1, log_odds_,
-             seq_sizes_, blanked_labels_, label_sizes_, not_repeated_):
+             durations_, blanked_labels_, label_sizes_, not_repeated_):
         y_t = log_odds_[t]
         a_t = a_tm1
         a_t = T.set_subtensor(
@@ -68,7 +68,7 @@ def ctc_forward(log_odds, seq_sizes,
             logaddexp(a_t[:, 2:], T.switch(not_repeated_, a_tm1[:, :-2], -2e9)))
 
         # stop after a_T(|l'|)
-        mask = T.ge(t, seq_sizes_)[:, None] \
+        mask = T.ge(t, durations_)[:, None] \
             + T.ge(T.arange(label_size)[None, :],
                    2 * label_sizes_[:, None] + 1)
 
@@ -82,32 +82,33 @@ def ctc_forward(log_odds, seq_sizes,
 
     alphas, _ = theano.scan(
         fn=step,
+        n_steps=seqsize,
+        strict=True,
         sequences=[T.arange(seqsize)],
         outputs_info=alpha_init,
-        non_sequences=[log_odds, seq_sizes, blanked_labels, label_sizes,
+        non_sequences=[log_odds, durations, blanked_labels, label_sizes,
                        not_repeated],
         name="ctc_forward")
 
     return alphas
 
 
-def ctc_backward(log_odds, seq_sizes,
-                 blanked_labels, label_sizes, not_repeated):
+def ctc_backward(log_odds, durations, blanked_labels, label_sizes, not_repeated):
     seqsize, batch_sz, _ = log_odds.shape
     label_size = blanked_labels.shape[1]
 
     def step(t, b_tp1, log_odds_,
-             seq_sizes_, blanked_labels_, label_sizes_, not_repeated_):
+             durations_, blanked_labels_, label_sizes_, not_repeated_):
         y_t = log_odds_[t]
 
         # increase b_{T+1}(|l'|) from 0 to 1 to initialize recursion
-        starter_t = T.eq(t, seq_sizes_ - 1)[:, None] \
+        starter_t = T.eq(t, durations_ - 1)[:, None] \
             * T.eq((2 * label_sizes_)[:, None],
                    T.arange(label_size)[None, :])
         b_tp1_2lp1 = b_tp1[T.arange(batch_sz), 2 * label_sizes_]
         b_tp1 = T.set_subtensor(
             b_tp1_2lp1,
-            T.switch(T.eq(t, seq_sizes_ - 1), 0, b_tp1_2lp1))
+            T.switch(T.eq(t, durations_ - 1), 0, b_tp1_2lp1))
         b_tp1 = T.switch(starter_t, 0, b_tp1)  # initialize recursion
 
         b_t = b_tp1
@@ -125,9 +126,11 @@ def ctc_backward(log_odds, seq_sizes,
 
     betas, _ = theano.scan(
         fn=step,
+        n_steps=seqsize,
+        strict=True,
         sequences=[T.arange(seqsize)],
         outputs_info=beta_init,
-        non_sequences=[log_odds, seq_sizes, blanked_labels, label_sizes,
+        non_sequences=[log_odds, durations, blanked_labels, label_sizes,
                        not_repeated],
         go_backwards=True,
         name="ctc_backward")
@@ -138,34 +141,28 @@ def ctc_backward(log_odds, seq_sizes,
 
 # Theano Op -------------------------------------------------------------------
 
-def ctc_perform_graph(linout, seq_sizes, labels, label_sizes, blank):
+def ctc_propagate(linout, durations, blanked_labels, label_sizes, not_repeated):
     _, batch_size, voca_size = linout.shape
 
     logits = log_softmax(linout)
-    blanked_labels = insert_alternating_blanks(labels, blank)
-    not_repeated = T.neq(blanked_labels[:, 2:], blanked_labels[:, :-2])
-    betas = ctc_backward(logits, seq_sizes,
+    betas = ctc_backward(logits, durations,
                          blanked_labels, label_sizes, not_repeated)
     loss = - logaddexp(betas[0, :, 0], betas[0, :, 1])
 
-    # alphas = ctc_forward(logits, seq_sizes,
+    # alphas = ctc_forward(logits, durations,
     #                      blanked_labels, label_sizes, not_repeated)
     # loss = - logaddexp(
-    #     alphas[seq_sizes - 1, T.arange(batch_size), 2 * label_sizes - 1],
-    #     alphas[seq_sizes - 1, T.arange(batch_size), 2 * label_sizes])
+    #     alphas[durations - 1, T.arange(batch_size), 2 * label_sizes - 1],
+    #     alphas[durations - 1, T.arange(batch_size), 2 * label_sizes])
 
-    return logits, blanked_labels, not_repeated, betas, loss
+    return loss, logits, betas
 
 
-def ctc_grad_graph(inputs, output_gradients):
-    linout, seq_durations, labels, label_sizes, _ = inputs
-    seq_size, batch_size, voca_size = linout.shape
-    label_size = labels.shape[1]
+def ctc_backprop(durations, blanked_labels, label_sizes, not_repeated,
+                 logits, betas, loss, output_gradient):
+    seq_size, batch_size, voca_size = logits.shape
 
-    logits, blanked_labels, not_repeated, betas, loss = \
-        ctc_perform_graph(*inputs)
-
-    alphas = ctc_forward(logits, seq_durations,
+    alphas = ctc_forward(logits, durations,
                          blanked_labels, label_sizes, not_repeated)
 
     # log(sum_{s \in lab(l, k)} a_t(s) b_t(s))
@@ -179,11 +176,11 @@ def ctc_grad_graph(inputs, output_gradients):
     ab = alphas + betas
     fwbw_sum = theano.scan(
         fn=fwbw_sum_step,
-        sequences=[T.arange(2 * label_size + 1)],
+        sequences=[T.arange(blanked_labels.shape[1])],
         outputs_info=-2e9 * T.ones((seq_size, batch_size, voca_size)),
         non_sequences=[blanked_labels, ab],
         strict=True,
-        name="fwbw_sum")[0][-1]
+        name="fwbw_sum")[0][-1]  # should be unrolled if label_size is known
 
     A = loss[None, :, None] + logits \
         + logsumexp(fwbw_sum - logits, axis=2, keepdims=True)
@@ -193,38 +190,83 @@ def ctc_grad_graph(inputs, output_gradients):
     dloss_dy = T.switch(T.all(isneginf(fwbw_sum), axis=2, keepdims=True),
                         0, dloss_dy)
 
-    return [dloss_dy * output_gradients[0][None, :, None],
+    return dloss_dy * output_gradient[None, :, None]
+
+
+def make_ctc_op():
+    preds_var = T.tensor3()
+    durations_var = T.ivector()
+    blanked_labels_var = T.imatrix()
+    bool_matrix = T.TensorType("bool", (False, False))
+    not_repeated_var = bool_matrix()
+    label_sizes_var = T.ivector()
+
+    # linout, durations, labels, label_sizes, blank = inputs
+    # seq_size, batch_size, voca_size = linout.shape
+    #
+    # logits, blanked_labels, not_repeated, betas, loss = \
+    #     ctc_perform_graph(linout, durations, labels, label_sizes, blank)
+
+    loss, logits, betas = ctc_propagate(preds_var, durations_var, blanked_labels_var,
+                                        label_sizes_var, not_repeated_var)
+
+    def backprop_op1(inputs, output_gradients):
+        del inputs
+        return [
+            output_gradients[0],
             theano.gradient.disconnected_type(),
             theano.gradient.disconnected_type(),
             theano.gradient.disconnected_type(),
             theano.gradient.disconnected_type()]
 
+    op1 = theano.OpFromGraph(
+        inputs=[preds_var, durations_var,
+                blanked_labels_var, label_sizes_var,
+                not_repeated_var],
+        outputs=[preds_var, logits, betas, loss],
+        grad_overrides=backprop_op1,
+        inline=True, name="ctcLossOp1")
 
-def make_ctc_op():
-    preds_var = T.tensor3()
-    seq_durations_var = T.ivector()
-    labels_var = T.imatrix()
-    label_sizes_var = T.ivector()
-    blank_var = T.iscalar()
+    def backprop_op2(inputs, output_gradients):
+        preds_var_, logits_, betas_, loss_, \
+            durations_, blanked_labels_, label_sizes_, not_repeated_ = inputs
+        output_gradient, = output_gradients
 
-    _, _, _, _, loss = ctc_perform_graph(
-        preds_var, seq_durations_var, labels_var,
-        label_sizes_var, blank_var)
+        g = ctc_backprop(durations_, blanked_labels_, label_sizes_, not_repeated_,
+                         logits_, betas_, loss_, output_gradient)
 
-    return theano.OpFromGraph(
-        inputs=[preds_var, seq_durations_var,
-                labels_var, label_sizes_var, blank_var],
-        outputs=[loss],
-        grad_overrides=ctc_grad_graph,
-        inline=True, name="ctcLossOp")
+        return [
+            g,
+            T.zeros_like(logits_),
+            # theano.gradient.disconnected_type(),
+            T.zeros_like(betas_),
+            # theano.gradient.disconnected_type(),
+            T.zeros_like(loss_),
+            theano.gradient.disconnected_type(),
+            theano.gradient.disconnected_type(),
+            theano.gradient.disconnected_type(),
+            theano.gradient.disconnected_type(),
+            theano.gradient.disconnected_type()]
 
+    preds, logits, betas, loss = op1(
+        preds_var, durations_var,
+        blanked_labels_var, label_sizes_var,
+        not_repeated_var)
 
-CTCLossOp = make_ctc_op()
+    op2 = theano.OpFromGraph(
+        inputs=[preds, logits, betas, loss,
+                durations_var, blanked_labels_var, label_sizes_var,
+                not_repeated_var],
+        outputs=[loss + preds.sum() * 0 + logits.sum() * 0 + betas.sum() * 0],
+        grad_overrides=backprop_op2,
+        inline=True, name="ctcLossOp2")
+
+    return op1, op2
 
 
 # -----------------------------------------------------------------------------
 
-def ctc_loss(linout, durations, labels, label_sizes, blank=-1):
+def ctc_loss(preds, durations, labels, label_sizes, blank=-1):
     """Compute the Connectionnist Temporal Classification loss [#graves2006]_.
 
     .. math:: L = - ln\left( \sum_{\pi \in \mathcal{B}^{-1}(l)} P(\pi | y)
@@ -238,7 +280,7 @@ def ctc_loss(linout, durations, labels, label_sizes, blank=-1):
 
     Parameters
     ----------
-    linout : Theano shared variable, expression or numpy array
+    preds : Theano shared variable, expression or numpy array
         The input values for the softmax function with shape
         duration x batch_size x nclasses.
     durations: Theano shared variable, expression or numpy array
@@ -266,13 +308,13 @@ def ctc_loss(linout, durations, labels, label_sizes, blank=-1):
        Proceedings of the 23rd international conference on Machine learning
        (pp. 369-376). ACM. ftp://ftp.idsia.ch/pub/juergen/icml2006.pdf
     """
-    linout = T.as_tensor_variable(linout)
+    preds = T.as_tensor_variable(preds)
     durations = T.as_tensor_variable(durations)
     labels = T.as_tensor_variable(labels)
     label_sizes = T.as_tensor_variable(label_sizes)
     blank = T.cast(T.as_tensor_variable(blank), 'int32')
 
-    if not(linout.dtype in continuous_dtypes and linout.ndim == 3):
+    if not(preds.dtype in continuous_dtypes and preds.ndim == 3):
         raise ValueError("preds must continuous with dimension 3")
     if not (durations.dtype in discrete_dtypes and durations.ndim == 1):
         raise ValueError("durations must be a integer vector")
@@ -283,8 +325,19 @@ def ctc_loss(linout, durations, labels, label_sizes, blank=-1):
     if not (blank.dtype in discrete_dtypes and blank.ndim == 0):
         raise ValueError("blank must be an integer value")
 
-    voca_size = T.cast(linout.shape[2], 'int32')
+    voca_size = T.cast(preds.shape[2], 'int32')
     labels = labels % voca_size
     blank = blank % voca_size
 
-    return CTCLossOp(linout, durations, labels, label_sizes, blank)
+    op1, op2 = make_ctc_op()
+
+    blanked_labels = insert_alternating_blanks(labels, blank)
+    not_repeated = T.neq(blanked_labels[:, 2:], blanked_labels[:, :-2])
+
+    preds, logits, betas, loss = op1(preds, durations,
+                                     blanked_labels, label_sizes,
+                                     not_repeated)
+    loss = op2(preds, logits, betas, loss,
+               durations, blanked_labels, label_sizes, not_repeated)
+
+    return loss

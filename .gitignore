@@ -7,6 +7,7 @@ __pycache__/
 
 # datasets
 *.zip
+papers/connectionist_temporal_classification/TIMIT
 
 # Distribution / packaging
 .Python
