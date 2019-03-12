@@ -1,0 +1,36 @@
+#Ubuntu CUDA Python3 docker file for sqzdet_theano under Theano 1.0
+# nvidia-docker build -t sqzdet_theano_py3k . --file sqzdet_theano_py3k.txt
+
+FROM nvidia/cuda:8.0-cudnn6-devel-ubuntu16.04
+
+RUN apt-get update && apt-get install -y \
+  apt-utils \
+  git \
+  wget
+
+RUN wget --no-check-certificate https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda3.sh
+
+RUN chmod +x miniconda3.sh && bash ./miniconda3.sh -b -p /opt/miniconda3
+
+ENV PATH /opt/miniconda3/bin:$PATH
+
+RUN conda update conda
+
+# as of 20171226: matplotlib=2.1.1 numpy=1.13.3 pillow=4.3.0
+RUN conda install \
+    matplotlib \
+    numpy \
+    pillow \
+    mkl-service
+
+# as of 20171226, bleeding-edge installs below: theano=1.0.1+unknown, lasagne=0.2.dev1
+RUN pip install \
+    easydict \
+    future \
+    --upgrade https://github.com/Theano/Theano/archive/master.zip \
+    --upgrade https://github.com/Lasagne/Lasagne/archive/master.zip
+
+#to avoid RuntimeError('To use MKL 2018 with Theano...')
+ENV MKL_THREADING_LAYER GNU
+
+# nvidia-docker run --rm -it --name st_3k  -v /home/ubuntu:/home/ubuntu sqzdet_theano_py3k
