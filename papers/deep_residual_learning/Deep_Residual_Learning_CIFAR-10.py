@@ -113,7 +113,7 @@ def build_cnn(input_var=None, n=5):
                 block = NonlinearityLayer(ElemwiseSumLayer([stack_2, projection]),nonlinearity=rectify)
             else:
                 # identity shortcut, as option A in paper
-                identity = ExpressionLayer(l, lambda X: X[:, :, ::2, ::2], lambda s: (s[0], s[1], s[2]//2, s[3]//2))
+                identity = ExpressionLayer(l, lambda X: X[:, :, ::2, ::2], lambda s: (s[0], s[1], (s[2]+1)//2, (s[3]+1)//2))
                 padding = PadLayer(identity, [out_num_filters//4,0,0], batch_ndim=1)
                 block = NonlinearityLayer(ElemwiseSumLayer([stack_2, padding]),nonlinearity=rectify)
         else:
