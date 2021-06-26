@@ -148,7 +148,7 @@ def rgb2caffe(im, out_size=(128, 171)):
         im = color.gray2rgb(im)
 
     h, w, _ = im.shape
-    im = skimage.transform.resize(im, out_size, preserve_range=True)
+    im = skimage.transform.resize(im, out_size,)
     im = np.swapaxes(np.swapaxes(im, 1, 2), 0, 1)
 
     # Convert to BGR
