@@ -46,6 +46,10 @@ htmlcov/
 nosetests.xml
 coverage.xml
 *,cover
+.pytest_cache/
+
+# Claude settings
+.claude/*
 
 # Translations
 *.mo
@@ -68,4 +72,34 @@ examples/UNet/*.pkl
 examples/UNet/*.png
 examples/UNet/readme.txt
 .gitignore~
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Poetry
+# Don't ignore poetry.lock - it should be committed
+dist/
+*.egg-info/
+
+# Build artifacts
+build/
+*.pyc
+*.pyo
+*.pyd
+.Python
 
